@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strconv"
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
@@ -134,9 +133,6 @@ func (r *ClickHouseRepository) InsertBatch(ctx context.Context, events []*domain
 			continue
 		}
 
-		// Convert TeamID to string for ClickHouse schema
-		teamIDStr := strconv.Itoa(event.TeamID)
-
 		// Handle nullable player_id - use pointer for nullable string
 		var playerID *string
 		if event.PlayerID != "" {
@@ -150,7 +146,7 @@ func (r *ClickHouseRepository) InsertBatch(ctx context.Context, events []*domain
 			event.EventID,
 			event.MatchID,
 			string(event.EventType),
-			teamIDStr,
+			uint8(event.TeamID),
 			playerID,
 			metadataJSON,
 			event.Timestamp,

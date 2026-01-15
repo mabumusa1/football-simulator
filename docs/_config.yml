@@ -1,0 +1,40 @@
+title: Fanfinity Infrastructure
+description: Real-time football match event streaming and viewer engagement analytics platform
+baseurl: ""
+url: ""
+
+theme: jekyll-theme-minimal
+
+# Build settings
+markdown: kramdown
+highlighter: rouge
+
+# Navigation
+header_pages:
+  - index.md
+  - getting-started.md
+  - architecture.md
+  - api-reference.md
+  - deployment.md
+  - development.md
+  - load-testing.md
+
+# Exclude from build
+exclude:
+  - Gemfile
+  - Gemfile.lock
+  - node_modules
+  - vendor
+
+# GitHub Pages settings
+plugins:
+  - jekyll-relative-links
+  - jekyll-seo-tag
+
+# Default front matter
+defaults:
+  - scope:
+      path: ""
+      type: "pages"
+    values:
+      layout: "default"
