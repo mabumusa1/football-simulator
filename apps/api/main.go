@@ -1,6 +1,7 @@
 package main
 
 import (
+	_ "embed"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -15,6 +16,9 @@ import (
 
 // Version is set at build time via ldflags.
 var Version = "dev"
+
+//go:embed openapi.yaml
+var openAPISpec []byte
 
 func main() {
 	// Initialize JSON logger for structured logging
@@ -54,7 +58,7 @@ func main() {
 	)
 
 	// Create HTTP router with dependencies
-	router := api.NewRouter(producer, repo, logger)
+	router := api.NewRouter(producer, repo, logger, cfg.APIKey, openAPISpec)
 	logger.Info("HTTP router created")
 
 	// Configure HTTP server with timeouts from config
@@ -89,6 +93,7 @@ func main() {
 
 	logger.Info("Football Simulator API server is running",
 		slog.String("address", addr),
+		slog.String("swagger_ui", "/"),
 		slog.String("health_endpoint", "/health"),
 		slog.String("ready_endpoint", "/ready"),
 		slog.String("metrics_endpoint", "/metrics"),

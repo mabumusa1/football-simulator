@@ -1,10 +1,3 @@
-# =============================================================================
-# DEV BASE CONFIGURATION - Networks & Volumes
-# =============================================================================
-# Development environment base configuration
-# Used with: devcontainer.json
-# =============================================================================
-
 networks:
   football-simulator-net:
     driver: bridge

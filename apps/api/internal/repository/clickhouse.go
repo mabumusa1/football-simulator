@@ -4,10 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strconv"
 	"time"
 
-	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -16,7 +14,6 @@ import (
 )
 
 var (
-	// Prometheus metrics for ClickHouse repository
 	clickhouseQueryDuration = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: "football_simulator",
@@ -37,29 +34,9 @@ var (
 		},
 		[]string{"operation"},
 	)
-
-	clickhouseBatchSize = promauto.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace: "football_simulator",
-			Subsystem: "clickhouse",
-			Name:      "batch_size",
-			Help:      "Histogram of batch insert sizes",
-			Buckets:   []float64{1, 10, 50, 100, 500, 1000, 5000, 10000},
-		},
-		[]string{},
-	)
-
-	clickhouseEventsInserted = promauto.NewCounter(
-		prometheus.CounterOpts{
-			Namespace: "football_simulator",
-			Subsystem: "clickhouse",
-			Name:      "events_inserted_total",
-			Help:      "Total number of events inserted into ClickHouse",
-		},
-	)
 )
 
-// ClickHouseRepository handles ClickHouse database operations.
+// ClickHouseRepository handles read-only ClickHouse database operations for metrics queries.
 type ClickHouseRepository struct {
 	conn   driver.Conn
 	logger *slog.Logger
@@ -99,112 +76,15 @@ func (r *ClickHouseRepository) Ping(ctx context.Context) error {
 	return nil
 }
 
-// InsertBatch inserts a batch of events into the football_simulator.match_events table.
-// Uses ClickHouse batch insert for optimal performance.
-func (r *ClickHouseRepository) InsertBatch(ctx context.Context, events []*domain.Event) error {
-	if len(events) == 0 {
-		return nil
-	}
-
-	startTime := time.Now()
-
-	// Prepare batch insert
-	batch, err := r.conn.PrepareBatch(ctx, `
-		INSERT INTO football_simulator.match_events (
-			event_id,
-			match_id,
-			event_type,
-			team_id,
-			player_id,
-			metadata,
-			timestamp
-		) VALUES (?, ?, ?, ?, ?, ?, ?)
-	`)
-	if err != nil {
-		r.logger.Error("failed to prepare batch insert",
-			slog.String("error", err.Error()),
-		)
-		clickhouseQueryErrors.WithLabelValues("insert_batch_prepare").Inc()
-		return fmt.Errorf("failed to prepare batch insert: %w", err)
-	}
-
-	// Append each event to the batch
-	for _, event := range events {
-		if event == nil {
-			continue
-		}
-
-		// Convert TeamID to string for ClickHouse schema
-		teamIDStr := strconv.Itoa(event.TeamID)
-
-		// Handle nullable player_id - use pointer for nullable string
-		var playerID *string
-		if event.PlayerID != "" {
-			playerID = &event.PlayerID
-		}
-
-		// Serialize metadata to JSON string
-		metadataJSON := event.MetadataJSON()
-
-		err = batch.Append(
-			event.EventID,
-			event.MatchID,
-			string(event.EventType),
-			teamIDStr,
-			playerID,
-			metadataJSON,
-			event.Timestamp,
-		)
-		if err != nil {
-			r.logger.Warn("failed to append event to batch",
-				slog.String("event_id", event.EventID.String()),
-				slog.String("error", err.Error()),
-			)
-			// Continue with other events rather than failing the entire batch
-			continue
-		}
-	}
-
-	// Send the batch
-	err = batch.Send()
-	duration := time.Since(startTime)
-
-	// Record metrics
-	clickhouseQueryDuration.WithLabelValues("insert_batch").Observe(duration.Seconds())
-	clickhouseBatchSize.WithLabelValues().Observe(float64(len(events)))
-
-	if err != nil {
-		r.logger.Error("failed to send batch insert",
-			slog.Int("batch_size", len(events)),
-			slog.Duration("duration", duration),
-			slog.String("error", err.Error()),
-		)
-		clickhouseQueryErrors.WithLabelValues("insert_batch_send").Inc()
-		return fmt.Errorf("failed to send batch insert: %w", err)
-	}
-
-	r.logger.Debug("successfully inserted batch",
-		slog.Int("batch_size", len(events)),
-		slog.Duration("duration", duration),
-	)
-	clickhouseEventsInserted.Add(float64(len(events)))
-
-	return nil
-}
-
 // GetMatchMetrics retrieves aggregated metrics for a specific match.
-// Queries the football_simulator.match_metrics materialized view and aggregates events by type.
 func (r *ClickHouseRepository) GetMatchMetrics(ctx context.Context, matchID string) (*domain.MatchMetrics, error) {
 	if matchID == "" {
 		return nil, fmt.Errorf("matchID cannot be empty")
 	}
 
 	startTime := time.Now()
-
-	// Query for basic metrics from aggregated view
 	metrics := domain.NewMatchMetrics(matchID)
 
-	// Query total events, goals, yellow cards, red cards, and time range
 	row := r.conn.QueryRow(ctx, `
 		SELECT
 			count(*) as total_events,
@@ -233,7 +113,6 @@ func (r *ClickHouseRepository) GetMatchMetrics(ctx context.Context, matchID stri
 		return nil, fmt.Errorf("failed to query match metrics: %w", err)
 	}
 
-	// If no events found, return nil
 	if totalEvents == 0 {
 		duration := time.Since(startTime)
 		clickhouseQueryDuration.WithLabelValues("get_match_metrics").Observe(duration.Seconds())
@@ -245,7 +124,6 @@ func (r *ClickHouseRepository) GetMatchMetrics(ctx context.Context, matchID stri
 	metrics.YellowCards = int64(yellowCards)
 	metrics.RedCards = int64(redCards)
 
-	// Set time pointers only if we have events
 	if !firstEventAt.IsZero() {
 		metrics.FirstEventAt = &firstEventAt
 	}
@@ -297,28 +175,6 @@ func (r *ClickHouseRepository) GetMatchMetrics(ctx context.Context, matchID stri
 		return nil, fmt.Errorf("error iterating events by type: %w", err)
 	}
 
-	// Query for peak engagement minute
-	peakRow := r.conn.QueryRow(ctx, `
-		SELECT
-			toStartOfMinute(timestamp) as minute,
-			count(*) as event_count
-		FROM football_simulator.match_events
-		WHERE match_id = ?
-		GROUP BY minute
-		ORDER BY event_count DESC
-		LIMIT 1
-	`, matchID)
-
-	var peakMinute time.Time
-	var peakCount uint64
-	err = peakRow.Scan(&peakMinute, &peakCount)
-	if err == nil && peakCount > 0 {
-		metrics.PeakMinute = &domain.PeakEngagement{
-			Minute:     peakMinute,
-			EventCount: int64(peakCount),
-		}
-	}
-
 	duration := time.Since(startTime)
 	clickhouseQueryDuration.WithLabelValues("get_match_metrics").Observe(duration.Seconds())
 
@@ -332,7 +188,6 @@ func (r *ClickHouseRepository) GetMatchMetrics(ctx context.Context, matchID stri
 }
 
 // GetEventsPerMinute retrieves events aggregated by minute for a specific match.
-// Uses the football_simulator.events_per_minute materialized view if available.
 func (r *ClickHouseRepository) GetEventsPerMinute(ctx context.Context, matchID string) ([]domain.EventsPerMinute, error) {
 	if matchID == "" {
 		return nil, fmt.Errorf("matchID cannot be empty")
@@ -402,69 +257,4 @@ func (r *ClickHouseRepository) GetEventsPerMinute(ctx context.Context, matchID s
 	)
 
 	return results, nil
-}
-
-// Close closes the ClickHouse connection.
-func (r *ClickHouseRepository) Close() error {
-	if r.conn == nil {
-		return nil
-	}
-	return r.conn.Close()
-}
-
-// ConnectionConfig holds configuration for ClickHouse connection.
-type ConnectionConfig struct {
-	Hosts           []string
-	Database        string
-	Username        string
-	Password        string
-	MaxOpenConns    int
-	MaxIdleConns    int
-	ConnMaxLifetime time.Duration
-	DialTimeout     time.Duration
-	ReadTimeout     time.Duration
-	Debug           bool
-}
-
-// DefaultConnectionConfig returns default ClickHouse connection configuration.
-func DefaultConnectionConfig() ConnectionConfig {
-	return ConnectionConfig{
-		Hosts:           []string{"localhost:9000"},
-		Database:        "football_simulator",
-		Username:        "default",
-		Password:        "",
-		MaxOpenConns:    10,
-		MaxIdleConns:    5,
-		ConnMaxLifetime: time.Hour,
-		DialTimeout:     10 * time.Second,
-		ReadTimeout:     30 * time.Second,
-		Debug:           false,
-	}
-}
-
-// NewConnection creates a new ClickHouse connection with the given configuration.
-func NewConnection(cfg ConnectionConfig) (driver.Conn, error) {
-	opts := &clickhouse.Options{
-		Addr: cfg.Hosts,
-		Auth: clickhouse.Auth{
-			Database: cfg.Database,
-			Username: cfg.Username,
-			Password: cfg.Password,
-		},
-		Settings: clickhouse.Settings{
-			"max_execution_time": 60,
-		},
-		DialTimeout:     cfg.DialTimeout,
-		MaxOpenConns:    cfg.MaxOpenConns,
-		MaxIdleConns:    cfg.MaxIdleConns,
-		ConnMaxLifetime: cfg.ConnMaxLifetime,
-		Debug:           cfg.Debug,
-	}
-
-	conn, err := clickhouse.Open(opts)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open ClickHouse connection: %w", err)
-	}
-
-	return conn, nil
 }

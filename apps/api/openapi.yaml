@@ -1,0 +1,349 @@
+openapi: 3.0.3
+info:
+  title: Football Events API
+  description: |
+    Real-time football match event ingestion and metrics API.
+
+    This API allows you to:
+    - Ingest match events (goals, passes, fouls, etc.)
+    - Query aggregated match metrics
+
+    All `/api` endpoints require authentication via the `X-API-Key` header.
+  version: 1.0.0
+  contact:
+    name: Mohammad Abu Musa<m.abumusa@gmail.com>
+
+servers:
+  - url: /
+    description: Current server
+
+tags:
+  - name: Events
+    description: Event ingestion endpoints
+  - name: Metrics
+    description: Match metrics and analytics
+  - name: Health
+    description: Health and readiness checks
+
+paths:
+  /health:
+    get:
+      tags:
+        - Health
+      summary: Health check
+      description: Simple health check that returns immediately without checking dependencies.
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /ready:
+    get:
+      tags:
+        - Health
+      summary: Readiness check
+      description: Verifies that all dependencies (ClickHouse) are available and the service is ready to accept traffic.
+      operationId: readinessCheck
+      responses:
+        '200':
+          description: Service is ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadinessResponse'
+        '503':
+          description: Service is not ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadinessResponse'
+
+  /api/events:
+    post:
+      tags:
+        - Events
+      summary: Ingest a match event
+      description: |
+        Accepts a match event, validates it, and queues it for processing.
+        Returns 202 Accepted immediately after the event is queued to Kafka.
+      operationId: ingestEvent
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EventRequest'
+            example:
+              eventId: "550e8400-e29b-41d4-a716-446655440000"
+              matchId: "match-2024-001"
+              eventType: "goal"
+              timestamp: "2024-01-15T14:30:00Z"
+              teamId: 1
+              playerId: "player-123"
+              metadata:
+                minute: 45
+                assistPlayerId: "player-456"
+      responses:
+        '202':
+          description: Event accepted and queued for processing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventResponse'
+        '400':
+          description: Invalid request (validation error)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid API key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Service unavailable (Kafka not available)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/matches/{matchId}/metrics:
+    get:
+      tags:
+        - Metrics
+      summary: Get match metrics
+      description: |
+        Retrieves aggregated metrics for a specific match including:
+        - Total events and breakdown by type
+        - Goal, card counts
+        - Peak engagement minute
+        - Response time percentiles
+      operationId: getMatchMetrics
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: matchId
+          in: path
+          required: true
+          description: Unique identifier of the match
+          schema:
+            type: string
+          example: "match-2024-001"
+      responses:
+        '200':
+          description: Match metrics retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MatchMetrics'
+        '400':
+          description: Invalid matchId
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid API key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Match not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API key for authentication
+
+  schemas:
+    EventRequest:
+      type: object
+      required:
+        - eventId
+        - matchId
+        - eventType
+        - timestamp
+        - teamId
+      properties:
+        eventId:
+          type: string
+          format: uuid
+          description: Unique identifier for the event
+        matchId:
+          type: string
+          description: Identifier of the match
+        eventType:
+          type: string
+          enum:
+            - pass
+            - shot
+            - goal
+            - foul
+            - yellow_card
+            - red_card
+            - substitution
+            - offside
+            - corner
+            - free_kick
+            - interception
+          description: Type of match event
+        timestamp:
+          type: string
+          format: date-time
+          description: When the event occurred (RFC3339 format)
+        teamId:
+          type: integer
+          enum: [1, 2]
+          description: Team identifier (1 or 2)
+        playerId:
+          type: string
+          description: Identifier of the player involved
+        metadata:
+          type: object
+          additionalProperties: true
+          description: Additional event-specific data
+
+    EventResponse:
+      type: object
+      properties:
+        eventId:
+          type: string
+          format: uuid
+          description: The event ID that was accepted
+        status:
+          type: string
+          example: "accepted"
+          description: Status of the event
+        timestamp:
+          type: string
+          format: date-time
+          description: Server timestamp when the event was accepted
+
+    MatchMetrics:
+      type: object
+      properties:
+        matchId:
+          type: string
+          description: Match identifier
+        totalEvents:
+          type: integer
+          format: int64
+          description: Total number of events in the match
+        eventsByType:
+          type: object
+          additionalProperties:
+            type: integer
+            format: int64
+          description: Count of events broken down by type
+        goals:
+          type: integer
+          format: int64
+          description: Number of goals scored
+        yellowCards:
+          type: integer
+          format: int64
+          description: Number of yellow cards issued
+        redCards:
+          type: integer
+          format: int64
+          description: Number of red cards issued
+        firstEventAt:
+          type: string
+          format: date-time
+          description: Timestamp of the first event
+        lastEventAt:
+          type: string
+          format: date-time
+          description: Timestamp of the last event
+        peakMinute:
+          $ref: '#/components/schemas/PeakEngagement'
+        responseTimePercentiles:
+          $ref: '#/components/schemas/ResponseTimePercentiles'
+
+    PeakEngagement:
+      type: object
+      properties:
+        minute:
+          type: string
+          format: date-time
+          description: The minute with peak activity
+        eventCount:
+          type: integer
+          format: int64
+          description: Number of events in that minute
+
+    ResponseTimePercentiles:
+      type: object
+      properties:
+        p50:
+          type: number
+          format: double
+          description: 50th percentile response time (ms)
+        p95:
+          type: number
+          format: double
+          description: 95th percentile response time (ms)
+        p99:
+          type: number
+          format: double
+          description: 99th percentile response time (ms)
+
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: "healthy"
+        timestamp:
+          type: string
+          format: date-time
+
+    ReadinessResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: ["ready", "not ready"]
+        timestamp:
+          type: string
+          format: date-time
+        checks:
+          type: object
+          additionalProperties:
+            type: string
+          description: Status of individual dependency checks
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Error type or HTTP status text
+        message:
+          type: string
+          description: Human-readable error message
+        field:
+          type: string
+          description: Field that caused the validation error (if applicable)

@@ -1,9 +1,3 @@
-# =============================================================================
-# Prometheus Configuration
-# =============================================================================
-# Scrape configuration for Docker Swarm services
-# =============================================================================
-
 global:
   scrape_interval: 15s          # How often to scrape targets
   evaluation_interval: 15s       # How often to evaluate rules
@@ -75,13 +69,3 @@ scrape_configs:
       - targets: ['clickhouse:9363']
         labels:
           service: clickhouse
-
-  # ---------------------------------------------------------------------------
-  # Kafka Metrics (via JMX Exporter - optional)
-  # ---------------------------------------------------------------------------
-  # Uncomment if you add a JMX exporter sidecar to Kafka
-  # - job_name: 'kafka'
-  #   static_configs:
-  #     - targets: ['kafka:7071']
-  #       labels:
-  #         service: kafka

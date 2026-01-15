@@ -11,6 +11,7 @@ type Config struct {
 	Server     ServerConfig
 	Kafka      KafkaConfig
 	ClickHouse ClickHouseConfig
+	APIKey     string
 }
 
 // ServerConfig holds HTTP server settings.
@@ -66,6 +67,7 @@ func LoadConfig() *Config {
 			User:     getEnv("CLICKHOUSE_USER", "default"),
 			Password: getEnv("CLICKHOUSE_PASSWORD", ""),
 		},
+		APIKey: getEnv("API_KEY", ""),
 	}
 }
 

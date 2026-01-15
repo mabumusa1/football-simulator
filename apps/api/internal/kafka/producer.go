@@ -219,6 +219,36 @@ func (p *EventProducer) Close() error {
 	return nil
 }
 
+// Ping checks the connectivity to Kafka brokers.
+func (p *EventProducer) Ping(ctx context.Context) error {
+	startTime := time.Now()
+
+	conn, err := kafka.DialContext(ctx, "tcp", p.writer.Addr.String())
+	if err != nil {
+		p.logger.Error("Kafka ping failed",
+			slog.Duration("duration", time.Since(startTime)),
+			slog.String("error", err.Error()),
+		)
+		return fmt.Errorf("kafka ping failed: %w", err)
+	}
+	defer conn.Close()
+
+	// Verify connectivity by fetching broker metadata
+	_, err = conn.Brokers()
+	if err != nil {
+		p.logger.Error("Kafka broker check failed",
+			slog.Duration("duration", time.Since(startTime)),
+			slog.String("error", err.Error()),
+		)
+		return fmt.Errorf("kafka broker check failed: %w", err)
+	}
+
+	p.logger.Debug("Kafka ping successful",
+		slog.Duration("duration", time.Since(startTime)),
+	)
+	return nil
+}
+
 // NewWriter creates a new Kafka writer with production-ready configuration.
 // The writer uses hash-based partitioning by key (matchId) to ensure ordering.
 func NewWriter(brokers []string, topic string) *kafka.Writer {

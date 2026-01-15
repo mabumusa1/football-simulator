@@ -1,6 +1,8 @@
 package api
 
 import (
+	"crypto/subtle"
+	"encoding/json"
 	"log/slog"
 	"math"
 	"net/http"
@@ -255,4 +257,38 @@ func RecordEventResponseTime(duration time.Duration) {
 // GetEventResponseTimePercentiles returns the current response time percentiles.
 func GetEventResponseTimePercentiles() *domain.ResponseTimePercentiles {
 	return eventsResponseTimeTracker.Percentiles()
+}
+
+// APIKeyAuth returns middleware that validates API key authentication.
+// It checks for the X-API-Key header and compares it against the expected key.
+// Returns 401 Unauthorized with a JSON error response if the key is missing or invalid.
+func APIKeyAuth(expectedAPIKey string) func(next http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			apiKey := r.Header.Get("X-API-Key")
+
+			if apiKey == "" {
+				writeUnauthorizedError(w, "missing API key")
+				return
+			}
+
+			// Use constant-time comparison to prevent timing attacks
+			if subtle.ConstantTimeCompare([]byte(apiKey), []byte(expectedAPIKey)) != 1 {
+				writeUnauthorizedError(w, "invalid API key")
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// writeUnauthorizedError writes a 401 Unauthorized JSON response.
+func writeUnauthorizedError(w http.ResponseWriter, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusUnauthorized)
+	json.NewEncoder(w).Encode(map[string]string{
+		"error":   "Unauthorized",
+		"message": message,
+	})
 }

@@ -1,10 +1,3 @@
-# =============================================================================
-# GO-API - HTTP API Service
-# =============================================================================
-# Receives events via HTTP and produces them to Kafka for async processing.
-# Exposes health, readiness, and Prometheus metrics endpoints.
-# =============================================================================
-
 services:
   go-api:
     image: ${REGISTRY:-localhost:5000}/football-simulator-api:${VERSION:-latest}

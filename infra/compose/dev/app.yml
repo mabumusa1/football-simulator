@@ -1,9 +1,3 @@
-# =============================================================================
-# DEV APP - Devcontainer Application Service
-# =============================================================================
-# The main development container with Go and Python tooling
-# =============================================================================
-
 services:
   app:
     image: mcr.microsoft.com/devcontainers/go:1

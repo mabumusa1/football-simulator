@@ -11,7 +11,7 @@ import (
 )
 
 // NewRouter creates and configures a new chi router with all routes and middleware.
-func NewRouter(producer EventProducer, repository MetricsRepository, logger *slog.Logger) *chi.Mux {
+func NewRouter(producer EventProducer, repository MetricsRepository, logger *slog.Logger, apiKey string, openAPISpec []byte) *chi.Mux {
 	r := chi.NewRouter()
 
 	// Apply middleware stack
@@ -25,6 +25,10 @@ func NewRouter(producer EventProducer, repository MetricsRepository, logger *slo
 	// Create handler
 	h := NewHandler(producer, repository)
 
+	// Swagger UI at root
+	r.Get("/", SwaggerUI)
+	r.Get("/openapi.yaml", ServeOpenAPISpec(openAPISpec))
+
 	// Health check endpoints (outside /api prefix)
 	r.Get("/health", h.HealthCheck)
 	r.Get("/ready", h.ReadinessCheck)
@@ -32,8 +36,11 @@ func NewRouter(producer EventProducer, repository MetricsRepository, logger *slo
 	// Prometheus metrics endpoint
 	r.Handle("/metrics", promhttp.Handler())
 
-	// API routes
+	// API routes (protected by API key authentication)
 	r.Route("/api", func(r chi.Router) {
+		// Apply API key authentication middleware to all /api routes
+		r.Use(APIKeyAuth(apiKey))
+
 		// Event ingestion
 		r.Post("/events", h.IngestEvent)
 
@@ -45,8 +52,8 @@ func NewRouter(producer EventProducer, repository MetricsRepository, logger *slo
 }
 
 // NewServer creates a new HTTP server with the configured router.
-func NewServer(addr string, producer EventProducer, repository MetricsRepository, logger *slog.Logger) *http.Server {
-	router := NewRouter(producer, repository, logger)
+func NewServer(addr string, producer EventProducer, repository MetricsRepository, logger *slog.Logger, apiKey string, openAPISpec []byte) *http.Server {
+	router := NewRouter(producer, repository, logger, apiKey, openAPISpec)
 
 	return &http.Server{
 		Addr:         addr,

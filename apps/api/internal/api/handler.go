@@ -14,9 +14,10 @@ import (
 // EventProducer defines the interface for producing events to Kafka.
 type EventProducer interface {
 	Produce(ctx context.Context, event *domain.Event) error
+	Ping(ctx context.Context) error
 }
 
-// MetricsRepository defines the interface for querying metrics from ClickHouse.
+// MetricsRepository defines the interface for querying metrics from ClickHouse (read-only).
 type MetricsRepository interface {
 	GetMatchMetrics(ctx context.Context, matchID string) (*domain.MatchMetrics, error)
 	GetEventsPerMinute(ctx context.Context, matchID string) ([]domain.EventsPerMinute, error)
@@ -183,28 +184,89 @@ type ReadinessResponse struct {
 }
 
 // ReadinessCheck handles GET /ready.
-// It verifies that dependencies (repository) are available.
+// It verifies that dependencies (repository and producer) are available.
 func (h *Handler) ReadinessCheck(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	checks := make(map[string]string)
+	healthy := true
 
-	// Check repository connectivity
+	// Check ClickHouse connectivity
 	if err := h.repository.Ping(ctx); err != nil {
 		checks["clickhouse"] = "unhealthy: " + err.Error()
-		response := ReadinessResponse{
-			Status:    "not ready",
-			Timestamp: time.Now().UTC(),
-			Checks:    checks,
-		}
-		respondJSON(w, http.StatusServiceUnavailable, response)
-		return
+		healthy = false
+	} else {
+		checks["clickhouse"] = "healthy"
 	}
-	checks["clickhouse"] = "healthy"
+
+	// Check Kafka connectivity
+	if err := h.producer.Ping(ctx); err != nil {
+		checks["kafka"] = "unhealthy: " + err.Error()
+		healthy = false
+	} else {
+		checks["kafka"] = "healthy"
+	}
+
+	status := "ready"
+	statusCode := http.StatusOK
+	if !healthy {
+		status = "not ready"
+		statusCode = http.StatusServiceUnavailable
+	}
 
 	response := ReadinessResponse{
-		Status:    "ready",
+		Status:    status,
 		Timestamp: time.Now().UTC(),
 		Checks:    checks,
 	}
-	respondJSON(w, http.StatusOK, response)
+	respondJSON(w, statusCode, response)
 }
+
+// SwaggerUI handles GET / and serves the Swagger UI documentation.
+func SwaggerUI(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(swaggerUIHTML))
+}
+
+// ServeOpenAPISpec handles GET /openapi.yaml and serves the OpenAPI specification.
+func ServeOpenAPISpec(spec []byte) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/x-yaml")
+		w.WriteHeader(http.StatusOK)
+		w.Write(spec)
+	}
+}
+
+const swaggerUIHTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Football Simulator Events API</title>
+    <link rel="stylesheet" type="text/css" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+    <style>
+        html { box-sizing: border-box; overflow-y: scroll; }
+        *, *:before, *:after { box-sizing: inherit; }
+        body { margin: 0; background: #fafafa; }
+        .swagger-ui .topbar { display: none; }
+    </style>
+</head>
+<body>
+    <div id="swagger-ui"></div>
+    <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+    <script>
+        window.onload = function() {
+            SwaggerUIBundle({
+                url: "/openapi.yaml",
+                dom_id: '#swagger-ui',
+                deepLinking: true,
+                presets: [
+                    SwaggerUIBundle.presets.apis,
+                    SwaggerUIBundle.SwaggerUIStandalonePreset
+                ],
+                layout: "BaseLayout"
+            });
+        };
+    </script>
+</body>
+</html>`

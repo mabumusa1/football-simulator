@@ -33,7 +33,7 @@ func NewContext(cfg *Config, logger *slog.Logger) (*AppContext, error) {
 		shutdownCh: make(chan struct{}),
 	}
 
-	// Initialize ClickHouse connection
+	// Initialize ClickHouse connection (read-only for metrics queries)
 	if err := ctx.initClickHouse(); err != nil {
 		return nil, fmt.Errorf("failed to initialize ClickHouse: %w", err)
 	}
@@ -53,7 +53,7 @@ func NewContext(cfg *Config, logger *slog.Logger) (*AppContext, error) {
 	return ctx, nil
 }
 
-// initClickHouse establishes a connection to ClickHouse with appropriate settings.
+// initClickHouse establishes a connection to ClickHouse for read-only metrics queries.
 func (c *AppContext) initClickHouse() error {
 	conn, err := clickhouse.Open(&clickhouse.Options{
 		Addr: []string{fmt.Sprintf("%s:%d", c.Config.ClickHouse.Host, c.Config.ClickHouse.Port)},
@@ -68,13 +68,11 @@ func (c *AppContext) initClickHouse() error {
 		Compression: &clickhouse.Compression{
 			Method: clickhouse.CompressionLZ4,
 		},
-		DialTimeout:          10 * time.Second,
-		MaxOpenConns:         10,
-		MaxIdleConns:         5,
-		ConnMaxLifetime:      time.Hour,
-		ConnOpenStrategy:     clickhouse.ConnOpenInOrder,
-		BlockBufferSize:      10,
-		MaxCompressionBuffer: 10240,
+		DialTimeout:      10 * time.Second,
+		MaxOpenConns:     5,
+		MaxIdleConns:     2,
+		ConnMaxLifetime:  time.Hour,
+		ConnOpenStrategy: clickhouse.ConnOpenInOrder,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to open ClickHouse connection: %w", err)
@@ -149,7 +147,7 @@ func (c *AppContext) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	// 3. Close ClickHouse connection last
+	// 3. Close ClickHouse connection
 	if c.ClickHouse != nil {
 		c.Logger.Info("Closing ClickHouse connection")
 		if err := c.ClickHouse.Close(); err != nil {
