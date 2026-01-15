@@ -14,7 +14,9 @@ type EventType string
 const (
 	EventTypePass         EventType = "pass"
 	EventTypeShot         EventType = "shot"
+	EventTypeShotOnTarget EventType = "shot_on_target"
 	EventTypeGoal         EventType = "goal"
+	EventTypeOwnGoal      EventType = "own_goal"
 	EventTypeFoul         EventType = "foul"
 	EventTypeYellowCard   EventType = "yellow_card"
 	EventTypeRedCard      EventType = "red_card"
@@ -22,14 +24,26 @@ const (
 	EventTypeOffside      EventType = "offside"
 	EventTypeCorner       EventType = "corner"
 	EventTypeFreeKick     EventType = "free_kick"
+	EventTypePenalty      EventType = "penalty"
+	EventTypePenaltySaved EventType = "penalty_saved"
 	EventTypeInterception EventType = "interception"
+	EventTypeTackle       EventType = "tackle"
+	EventTypeSave         EventType = "save"
+	EventTypeInjury       EventType = "injury"
+	EventTypeVARReview    EventType = "var_review"
+	EventTypeKickoff      EventType = "kickoff"
+	EventTypeHalfTime     EventType = "half_time"
+	EventTypeSecondHalf   EventType = "second_half"
+	EventTypeFullTime     EventType = "full_time"
 )
 
 // ValidEventTypes is a map of all valid event types for validation.
 var ValidEventTypes = map[EventType]bool{
 	EventTypePass:         true,
 	EventTypeShot:         true,
+	EventTypeShotOnTarget: true,
 	EventTypeGoal:         true,
+	EventTypeOwnGoal:      true,
 	EventTypeFoul:         true,
 	EventTypeYellowCard:   true,
 	EventTypeRedCard:      true,
@@ -37,7 +51,17 @@ var ValidEventTypes = map[EventType]bool{
 	EventTypeOffside:      true,
 	EventTypeCorner:       true,
 	EventTypeFreeKick:     true,
+	EventTypePenalty:      true,
+	EventTypePenaltySaved: true,
 	EventTypeInterception: true,
+	EventTypeTackle:       true,
+	EventTypeSave:         true,
+	EventTypeInjury:       true,
+	EventTypeVARReview:    true,
+	EventTypeKickoff:      true,
+	EventTypeHalfTime:     true,
+	EventTypeSecondHalf:   true,
+	EventTypeFullTime:     true,
 }
 
 // Event represents a validated match event in the domain layer.

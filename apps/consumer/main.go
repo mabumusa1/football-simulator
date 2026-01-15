@@ -53,8 +53,8 @@ func main() {
 			Method: clickhouse.CompressionLZ4,
 		},
 		DialTimeout:          10 * time.Second,
-		MaxOpenConns:         10,
-		MaxIdleConns:         5,
+		MaxOpenConns:         25,
+		MaxIdleConns:         10,
 		ConnMaxLifetime:      time.Hour,
 		ConnOpenStrategy:     clickhouse.ConnOpenInOrder,
 		BlockBufferSize:      10,
@@ -86,10 +86,10 @@ func main() {
 	)
 
 	// Create Kafka reader for events topic
-	reader := kafkalib.NewReader(kafkalib.ReaderConfig{
+	eventsReader := kafkalib.NewReader(kafkalib.ReaderConfig{
 		Brokers:        []string{cfg.Kafka.BootstrapServers},
 		Topic:          cfg.Kafka.TopicEvents,
-		GroupID:        cfg.Consumer.ConsumerGroup,
+		GroupID:        cfg.Consumer.ConsumerGroup + "-events",
 		MinBytes:       1,
 		MaxBytes:       10e6, // 10MB
 		MaxWait:        cfg.Consumer.FlushInterval,
@@ -100,10 +100,31 @@ func main() {
 			DualStack: true,
 		},
 	})
-	logger.Info("Kafka reader created",
+	logger.Info("Kafka events reader created",
 		slog.String("brokers", cfg.Kafka.BootstrapServers),
 		slog.String("topic", cfg.Kafka.TopicEvents),
-		slog.String("group_id", cfg.Consumer.ConsumerGroup),
+		slog.String("group_id", cfg.Consumer.ConsumerGroup+"-events"),
+	)
+
+	// Create Kafka reader for engagements topic
+	engagementsReader := kafkalib.NewReader(kafkalib.ReaderConfig{
+		Brokers:        []string{cfg.Kafka.BootstrapServers},
+		Topic:          cfg.Kafka.TopicEngagements,
+		GroupID:        cfg.Consumer.ConsumerGroup + "-engagements",
+		MinBytes:       1,
+		MaxBytes:       10e6, // 10MB
+		MaxWait:        cfg.Consumer.FlushInterval,
+		CommitInterval: time.Second,
+		StartOffset:    kafkalib.FirstOffset,
+		Dialer: &kafkalib.Dialer{
+			Timeout:   10 * time.Second,
+			DualStack: true,
+		},
+	})
+	logger.Info("Kafka engagements reader created",
+		slog.String("brokers", cfg.Kafka.BootstrapServers),
+		slog.String("topic", cfg.Kafka.TopicEngagements),
+		slog.String("group_id", cfg.Consumer.ConsumerGroup+"-engagements"),
 	)
 
 	// Create Kafka writer for retry topic
@@ -140,21 +161,38 @@ func main() {
 	repo := repository.NewClickHouseRepository(chConn, logger)
 	logger.Info("ClickHouse repository created")
 
-	// Create batch consumer
-	consumer := kafka.NewBatchConsumer(kafka.BatchConsumerConfig{
-		Reader:        reader,
+	// Create batch consumer for events
+	eventsConsumer := kafka.NewBatchConsumer(kafka.BatchConsumerConfig{
+		Reader:        eventsReader,
 		Repository:    repo,
 		RetryWriter:   retryWriter,
 		DeadWriter:    deadWriter,
 		BatchSize:     cfg.Consumer.BatchSize,
 		FlushInterval: cfg.Consumer.FlushInterval,
 		MaxRetries:    cfg.Consumer.MaxRetries,
+		WorkerCount:   cfg.Consumer.WorkerCount,
 		Logger:        logger,
 	})
-	logger.Info("batch consumer created",
+	logger.Info("events consumer created",
 		slog.Int("batch_size", cfg.Consumer.BatchSize),
 		slog.Duration("flush_interval", cfg.Consumer.FlushInterval),
 		slog.Int("max_retries", cfg.Consumer.MaxRetries),
+		slog.Int("worker_count", cfg.Consumer.WorkerCount),
+	)
+
+	// Create engagement consumer (optimized for high volume)
+	engagementConsumer := kafka.NewEngagementConsumer(kafka.EngagementConsumerConfig{
+		Reader:        engagementsReader,
+		Repository:    repo,
+		BatchSize:     cfg.Consumer.EngagementBatchSize,
+		FlushInterval: cfg.Consumer.EngagementFlushInterval,
+		WorkerCount:   cfg.Consumer.EngagementWorkerCount,
+		Logger:        logger,
+	})
+	logger.Info("engagement consumer created",
+		slog.Int("batch_size", cfg.Consumer.EngagementBatchSize),
+		slog.Duration("flush_interval", cfg.Consumer.EngagementFlushInterval),
+		slog.Int("worker_count", cfg.Consumer.EngagementWorkerCount),
 	)
 
 	// Start Prometheus metrics server in a goroutine
@@ -179,13 +217,19 @@ func main() {
 	ctx, cancel = context.WithCancel(context.Background())
 	defer cancel()
 
-	// Start consumer in a goroutine
+	// Start events consumer in a goroutine
 	go func() {
-		consumer.Start(ctx)
+		eventsConsumer.Start(ctx)
+	}()
+
+	// Start engagement consumer in a goroutine
+	go func() {
+		engagementConsumer.Start(ctx)
 	}()
 
 	logger.Info("Football Simulator event consumer is running",
 		slog.String("events_topic", cfg.Kafka.TopicEvents),
+		slog.String("engagements_topic", cfg.Kafka.TopicEngagements),
 		slog.String("retry_topic", cfg.Kafka.TopicRetry),
 		slog.String("dead_topic", cfg.Kafka.TopicDead),
 	)
@@ -206,9 +250,12 @@ func main() {
 	// Cancel the consumer context to trigger graceful shutdown
 	cancel()
 
-	// Stop the consumer (will flush remaining batch)
-	consumer.Stop()
-	logger.Info("consumer stopped")
+	// Stop both consumers (will flush remaining batches)
+	eventsConsumer.Stop()
+	logger.Info("events consumer stopped")
+
+	engagementConsumer.Stop()
+	logger.Info("engagement consumer stopped")
 
 	// Shutdown metrics server
 	if err := metricsServer.Shutdown(shutdownCtx); err != nil {
@@ -218,13 +265,20 @@ func main() {
 	}
 	logger.Info("metrics server stopped")
 
-	// Close Kafka reader
-	if err := reader.Close(); err != nil {
-		logger.Error("failed to close Kafka reader",
+	// Close Kafka readers
+	if err := eventsReader.Close(); err != nil {
+		logger.Error("failed to close events Kafka reader",
 			slog.String("error", err.Error()),
 		)
 	}
-	logger.Info("Kafka reader closed")
+	logger.Info("Kafka events reader closed")
+
+	if err := engagementsReader.Close(); err != nil {
+		logger.Error("failed to close engagements Kafka reader",
+			slog.String("error", err.Error()),
+		)
+	}
+	logger.Info("Kafka engagements reader closed")
 
 	// Close Kafka writers
 	if err := retryWriter.Close(); err != nil {

@@ -18,6 +18,7 @@ type KafkaConfig struct {
 	BootstrapServers string
 	TopicPrefix      string
 	TopicEvents      string
+	TopicEngagements string
 	TopicRetry       string
 	TopicDead        string
 }
@@ -38,6 +39,12 @@ type ConsumerConfig struct {
 	MaxRetries    int
 	RetryBackoff  time.Duration
 	ConsumerGroup string
+	WorkerCount   int // Number of parallel consumer workers
+
+	// Engagement-specific settings (high volume)
+	EngagementBatchSize     int
+	EngagementFlushInterval time.Duration
+	EngagementWorkerCount   int
 }
 
 // LoadConfig reads configuration from environment variables with sensible defaults.
@@ -47,6 +54,7 @@ func LoadConfig() *Config {
 			BootstrapServers: getEnv("KAFKA_BOOTSTRAP_SERVERS", "kafka:29092"),
 			TopicPrefix:      getEnv("KAFKA_TOPIC_PREFIX", "football_simulator"),
 			TopicEvents:      getEnv("KAFKA_TOPIC_EVENTS", "football_simulator.events"),
+			TopicEngagements: getEnv("KAFKA_TOPIC_ENGAGEMENTS", "football_simulator.engagements"),
 			TopicRetry:       getEnv("KAFKA_TOPIC_RETRY", "football_simulator.retry"),
 			TopicDead:        getEnv("KAFKA_TOPIC_DEAD", "football_simulator.dead"),
 		},
@@ -58,11 +66,18 @@ func LoadConfig() *Config {
 			Password: getEnv("CLICKHOUSE_PASSWORD", ""),
 		},
 		Consumer: ConsumerConfig{
-			BatchSize:     getEnvInt("CONSUMER_BATCH_SIZE", 1000),
-			FlushInterval: getEnvDuration("CONSUMER_FLUSH_INTERVAL", 5*time.Second),
+			// Event consumer settings (lower volume game events)
+			BatchSize:     getEnvInt("CONSUMER_BATCH_SIZE", 500),
+			FlushInterval: getEnvDuration("CONSUMER_FLUSH_INTERVAL", 1*time.Second),
 			MaxRetries:    getEnvInt("CONSUMER_MAX_RETRIES", 3),
 			RetryBackoff:  getEnvDuration("CONSUMER_RETRY_BACKOFF", 1*time.Second),
 			ConsumerGroup: getEnv("CONSUMER_GROUP", "football_simulator-consumers"),
+			WorkerCount:   getEnvInt("CONSUMER_WORKER_COUNT", 2),
+
+			// Engagement consumer settings (high volume - 100K+ viewers)
+			EngagementBatchSize:     getEnvInt("ENGAGEMENT_BATCH_SIZE", 5000),
+			EngagementFlushInterval: getEnvDuration("ENGAGEMENT_FLUSH_INTERVAL", 200*time.Millisecond),
+			EngagementWorkerCount:   getEnvInt("ENGAGEMENT_WORKER_COUNT", 16),
 		},
 	}
 }

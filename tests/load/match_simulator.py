@@ -252,8 +252,10 @@ class Viewer:
 @dataclass
 class SimulationStats:
     game_events_total: int = 0
+    game_events_sent: int = 0
     game_events_by_type: Dict[str, int] = field(default_factory=lambda: defaultdict(int))
     engagement_total: int = 0
+    engagements_sent: int = 0
     engagement_by_type: Dict[str, int] = field(default_factory=lambda: defaultdict(int))
     engagement_by_minute: Dict[int, int] = field(default_factory=lambda: defaultdict(int))
     viewers_current: int = 0
@@ -315,6 +317,7 @@ class MatchSimulator:
         team2_name: str = "AlNassr",
         target_viewers: int = 100000,
         match_duration: int = 90,
+        real_duration: int = 60,  # Real-world seconds to complete simulation
         events_per_minute: Tuple[int, int] = (20, 50),
         engagement_batch_size: int = 500,
         concurrent_requests: int = 50
@@ -324,6 +327,8 @@ class MatchSimulator:
         self.api_key = api_key
         self.target_viewers = target_viewers
         self.match_duration = match_duration
+        self.real_duration = real_duration  # Total real-world seconds for simulation
+        self.seconds_per_minute = real_duration / match_duration  # Time compression factor
         self.events_per_minute = events_per_minute
         self.engagement_batch_size = engagement_batch_size
         self.concurrent_requests = concurrent_requests
@@ -565,11 +570,15 @@ class MatchSimulator:
                 ) as response:
                     self.stats.api_calls += 1
                     self.stats.api_latency_sum += time.time() - start
-                    if response.status not in [200, 201, 202]:
+                    if response.status in [200, 201, 202]:
+                        self.stats.game_events_sent += 1
+                    else:
                         self.stats.api_errors += 1
+                        body = await response.text()
+                        logger.error(f"Game event API error: HTTP {response.status} - {body[:200]}")
             except Exception as e:
                 self.stats.api_errors += 1
-                logger.debug(f"Game event API error: {e}")
+                logger.error(f"Game event API exception: {type(e).__name__}: {e}")
 
         return True
 
@@ -595,12 +604,16 @@ class MatchSimulator:
             ) as response:
                 self.stats.api_calls += 1
                 self.stats.api_latency_sum += time.time() - start
-                if response.status not in [200, 201, 202]:
+                if response.status in [200, 201, 202]:
+                    self.stats.engagements_sent += len(engagements)
+                else:
                     self.stats.api_errors += 1
+                    body = await response.text()
+                    logger.error(f"Engagement API error: HTTP {response.status} - {body[:200]}")
                     return False
         except Exception as e:
             self.stats.api_errors += 1
-            logger.debug(f"Engagement API error: {e}")
+            logger.error(f"Engagement API exception: {type(e).__name__}: {e}")
             return False
 
         return True
@@ -671,26 +684,17 @@ class MatchSimulator:
 
         return game_events, engagements
 
-    async def _ramp_up_viewers(self, target: int, duration_seconds: int = 120):
-        """Gradually add viewers"""
-        logger.info(f"Ramping up to {target:,} viewers over {duration_seconds}s...")
+    async def _ramp_up_viewers(self, target: int):
+        """Add all viewers immediately (no gradual ramp-up)"""
+        logger.info(f"Adding {target:,} viewers...")
 
-        viewers_per_second = target / duration_seconds
-        added = 0
+        for i in range(target):
+            viewer = self._create_viewer()
+            self.viewers[viewer.user_id] = viewer
+            if (i + 1) % 25000 == 0:
+                logger.info(f"  Added {i + 1:,}/{target:,} viewers")
 
-        while added < target:
-            batch = int(min(viewers_per_second, target - added))
-            for _ in range(batch):
-                viewer = self._create_viewer()
-                self.viewers[viewer.user_id] = viewer
-                added += 1
-
-            if added % 10000 == 0:
-                logger.info(f"  Added {added:,}/{target:,} viewers")
-
-            await asyncio.sleep(1)
-
-        logger.info(f"Ramp-up complete: {len(self.viewers):,} viewers active")
+        logger.info(f"Viewers ready: {len(self.viewers):,} active")
 
     async def run(self):
         """Run the full match simulation"""
@@ -698,12 +702,12 @@ class MatchSimulator:
         logger.info(f"MATCH SIMULATION: {self.team1.name} vs {self.team2.name}")
         logger.info(f"Match ID: {self.match_id}")
         logger.info(f"Target Viewers: {self.target_viewers:,}")
-        logger.info(f"Duration: {self.match_duration} minutes")
+        logger.info(f"Match Duration: {self.match_duration} minutes (no delays)")
         logger.info("=" * 60)
 
         connector = aiohttp.TCPConnector(limit=self.concurrent_requests)
         async with aiohttp.ClientSession(connector=connector) as session:
-            # Ramp up viewers before kickoff
+            # Add all viewers before kickoff
             await self._ramp_up_viewers(self.target_viewers)
 
             # Simulate each minute
@@ -720,16 +724,13 @@ class MatchSimulator:
                     batch = engagements[i:i + self.engagement_batch_size]
                     await self._send_engagements(session, batch)
 
-                # Progress log
-                if minute % 5 == 0 or minute in [45, 90]:
+                # Progress log every 15 minutes
+                if minute % 15 == 0 or minute in [45, 90]:
                     logger.info(
                         f"Min {minute:2d} | Score: {self.score[1]}-{self.score[2]} | "
                         f"Viewers: {len(self.viewers):,} | "
                         f"Engagements: {self.stats.engagement_by_minute[minute]:,}"
                     )
-
-                # Small delay to simulate real-time (remove for max throughput)
-                # await asyncio.sleep(0.05)
 
         self._print_final_stats()
 
@@ -746,6 +747,7 @@ class MatchSimulator:
         print("GAME EVENTS ON FIELD")
         print("-" * 70)
         print(f"{'Total Events:':<20} {self.stats.game_events_total:,}")
+        print(f"{'Events Sent:':<20} {self.stats.game_events_sent:,}")
         print("\nBy Type:")
         for etype, count in sorted(self.stats.game_events_by_type.items(), key=lambda x: -x[1])[:10]:
             print(f"  {etype:<20} {count:,}")
@@ -755,6 +757,7 @@ class MatchSimulator:
         print("-" * 70)
         print(f"{'Peak Viewers:':<20} {self.stats.viewers_peak:,}")
         print(f"{'Total Engagements:':<20} {self.stats.engagement_total:,}")
+        print(f"{'Engagements Sent:':<20} {self.stats.engagements_sent:,}")
         print(f"{'Eng/Viewer:':<20} {self.stats.engagement_total / max(self.stats.viewers_peak, 1):.1f}")
 
         print("\nEngagement by Type:")
@@ -793,7 +796,8 @@ def main():
     parser.add_argument("--team1-name", default="AlHilal")
     parser.add_argument("--team2-name", default="AlNassr")
     parser.add_argument("--viewers", type=int, default=100000)
-    parser.add_argument("--duration", type=int, default=90)
+    parser.add_argument("--duration", type=int, default=90, help="Match duration in game minutes")
+    parser.add_argument("--real-duration", type=int, default=60, help="Real-world seconds to run simulation (default: 60s)")
     parser.add_argument("--batch-size", type=int, default=500)
     parser.add_argument("--concurrency", type=int, default=50)
 
@@ -814,6 +818,7 @@ def main():
         team2_name=args.team2_name,
         target_viewers=args.viewers,
         match_duration=args.duration,
+        real_duration=args.real_duration,
         engagement_batch_size=args.batch_size,
         concurrent_requests=args.concurrency
     )

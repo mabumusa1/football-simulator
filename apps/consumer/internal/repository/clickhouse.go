@@ -56,6 +56,15 @@ var (
 			Help:      "Total number of events inserted into ClickHouse",
 		},
 	)
+
+	clickhouseEngagementsInserted = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "football_simulator",
+			Subsystem: "clickhouse",
+			Name:      "engagements_inserted_total",
+			Help:      "Total number of engagement events inserted into ClickHouse",
+		},
+	)
 )
 
 // ClickHouseRepository handles ClickHouse database operations.
@@ -184,6 +193,102 @@ func (r *ClickHouseRepository) InsertBatch(ctx context.Context, events []*domain
 		slog.Duration("duration", duration),
 	)
 	clickhouseEventsInserted.Add(float64(len(events)))
+
+	return nil
+}
+
+// InsertEngagementBatch inserts a batch of engagement events into the football_simulator.engagement_events table.
+func (r *ClickHouseRepository) InsertEngagementBatch(ctx context.Context, events []*domain.EngagementEvent) error {
+	if len(events) == 0 {
+		return nil
+	}
+
+	startTime := time.Now()
+
+	// Prepare batch insert
+	batch, err := r.conn.PrepareBatch(ctx, `
+		INSERT INTO football_simulator.engagement_events (
+			event_id,
+			match_id,
+			user_id,
+			session_id,
+			engagement_type,
+			engagement_subtype,
+			related_game_event_id,
+			game_minute,
+			device_type,
+			platform,
+			country_code,
+			content,
+			metadata,
+			timestamp
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`)
+	if err != nil {
+		r.logger.Error("failed to prepare engagement batch insert",
+			slog.String("error", err.Error()),
+		)
+		clickhouseQueryErrors.WithLabelValues("insert_engagement_batch_prepare").Inc()
+		return fmt.Errorf("failed to prepare engagement batch insert: %w", err)
+	}
+
+	// Append each event to the batch
+	for _, event := range events {
+		if event == nil {
+			continue
+		}
+
+		// Serialize metadata to JSON string
+		metadataJSON := event.MetadataJSON()
+
+		err = batch.Append(
+			event.EventID,
+			event.MatchID,
+			event.UserID,
+			event.SessionID,
+			string(event.EngagementType),
+			event.EngagementSubtype,
+			event.RelatedGameEventID,
+			uint8(event.GameMinute),
+			event.DeviceType,
+			event.Platform,
+			event.CountryCode,
+			event.Content,
+			metadataJSON,
+			event.Timestamp,
+		)
+		if err != nil {
+			r.logger.Warn("failed to append engagement event to batch",
+				slog.String("event_id", event.EventID.String()),
+				slog.String("error", err.Error()),
+			)
+			continue
+		}
+	}
+
+	// Send the batch
+	err = batch.Send()
+	duration := time.Since(startTime)
+
+	// Record metrics
+	clickhouseQueryDuration.WithLabelValues("insert_engagement_batch").Observe(duration.Seconds())
+	clickhouseBatchSize.WithLabelValues().Observe(float64(len(events)))
+
+	if err != nil {
+		r.logger.Error("failed to send engagement batch insert",
+			slog.Int("batch_size", len(events)),
+			slog.Duration("duration", duration),
+			slog.String("error", err.Error()),
+		)
+		clickhouseQueryErrors.WithLabelValues("insert_engagement_batch_send").Inc()
+		return fmt.Errorf("failed to send engagement batch insert: %w", err)
+	}
+
+	r.logger.Debug("successfully inserted engagement batch",
+		slog.Int("batch_size", len(events)),
+		slog.Duration("duration", duration),
+	)
+	clickhouseEngagementsInserted.Add(float64(len(events)))
 
 	return nil
 }

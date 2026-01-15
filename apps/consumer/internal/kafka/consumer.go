@@ -92,6 +92,7 @@ type BatchConsumer struct {
 	batchSize     int
 	flushInterval time.Duration
 	maxRetries    int
+	workerCount   int
 	logger        *slog.Logger
 
 	batch     []*domain.Event
@@ -111,6 +112,7 @@ type BatchConsumerConfig struct {
 	BatchSize     int
 	FlushInterval time.Duration
 	MaxRetries    int
+	WorkerCount   int
 	Logger        *slog.Logger
 }
 
@@ -120,10 +122,13 @@ func NewBatchConsumer(cfg BatchConsumerConfig) *BatchConsumer {
 		cfg.BatchSize = 1000
 	}
 	if cfg.FlushInterval <= 0 {
-		cfg.FlushInterval = 5 * time.Second
+		cfg.FlushInterval = 1 * time.Second
 	}
 	if cfg.MaxRetries <= 0 {
 		cfg.MaxRetries = 3
+	}
+	if cfg.WorkerCount <= 0 {
+		cfg.WorkerCount = 4
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
@@ -137,6 +142,7 @@ func NewBatchConsumer(cfg BatchConsumerConfig) *BatchConsumer {
 		batchSize:     cfg.BatchSize,
 		flushInterval: cfg.FlushInterval,
 		maxRetries:    cfg.MaxRetries,
+		workerCount:   cfg.WorkerCount,
 		logger:        cfg.Logger,
 		batch:         make([]*domain.Event, 0, cfg.BatchSize),
 		messages:      make([]kafka.Message, 0, cfg.BatchSize),
@@ -150,32 +156,46 @@ func (c *BatchConsumer) Start(ctx context.Context) {
 	c.logger.Info("starting batch consumer",
 		slog.Int("batch_size", c.batchSize),
 		slog.Duration("flush_interval", c.flushInterval),
+		slog.Int("worker_count", c.workerCount),
 	)
 
 	c.ticker = time.NewTicker(c.flushInterval)
-	defer c.ticker.Stop()
 
+	// Start the flusher goroutine
 	c.wg.Add(1)
+	go c.flusher(ctx)
+
+	// Start worker goroutines
+	for i := 0; i < c.workerCount; i++ {
+		c.wg.Add(1)
+		go c.worker(ctx, i)
+	}
+
+	// Wait for shutdown
+	<-ctx.Done()
+	c.logger.Info("context cancelled, stopping workers")
+
+	// Signal done and wait for workers
+	close(c.done)
+}
+
+// worker fetches and processes messages from Kafka.
+func (c *BatchConsumer) worker(ctx context.Context, workerID int) {
 	defer c.wg.Done()
+
+	c.logger.Info("worker started", slog.Int("worker_id", workerID))
 
 	for {
 		select {
 		case <-ctx.Done():
-			c.logger.Info("context cancelled, flushing remaining batch")
-			c.flushWithContext(context.Background())
+			c.logger.Info("worker stopping", slog.Int("worker_id", workerID))
 			return
-
 		case <-c.done:
-			c.logger.Info("stop signal received, flushing remaining batch")
-			c.flushWithContext(context.Background())
+			c.logger.Info("worker stopping", slog.Int("worker_id", workerID))
 			return
-
-		case <-c.ticker.C:
-			c.flushWithContext(ctx)
-
 		default:
 			// Fetch message with a short timeout to allow checking for shutdown
-			fetchCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+			fetchCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
 			msg, err := c.reader.FetchMessage(fetchCtx)
 			cancel()
 
@@ -189,6 +209,7 @@ func (c *BatchConsumer) Start(ctx context.Context) {
 					continue
 				}
 				c.logger.Error("failed to fetch message",
+					slog.Int("worker_id", workerID),
 					slog.String("error", err.Error()),
 				)
 				continue
@@ -223,6 +244,7 @@ func (c *BatchConsumer) Start(ctx context.Context) {
 			c.batchLock.Unlock()
 
 			c.logger.Debug("message added to batch",
+				slog.Int("worker_id", workerID),
 				slog.String("event_id", event.EventID.String()),
 				slog.Int("batch_size", batchLen),
 			)
@@ -231,6 +253,29 @@ func (c *BatchConsumer) Start(ctx context.Context) {
 			if batchLen >= c.batchSize {
 				c.flushWithContext(ctx)
 			}
+		}
+	}
+}
+
+// flusher periodically flushes the batch.
+func (c *BatchConsumer) flusher(ctx context.Context) {
+	defer c.wg.Done()
+	defer c.ticker.Stop()
+
+	c.logger.Info("flusher started")
+
+	for {
+		select {
+		case <-ctx.Done():
+			c.logger.Info("flusher stopping, final flush")
+			c.flushWithContext(context.Background())
+			return
+		case <-c.done:
+			c.logger.Info("flusher stopping, final flush")
+			c.flushWithContext(context.Background())
+			return
+		case <-c.ticker.C:
+			c.flushWithContext(ctx)
 		}
 	}
 }

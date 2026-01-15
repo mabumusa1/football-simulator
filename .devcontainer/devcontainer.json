@@ -33,11 +33,12 @@
     }
   },
 
-  "forwardPorts": [8080, 8123, 9000, 9092, 8081, 9090, 9091, 3005],
+  "forwardPorts": [8080, 8123, 9000, 9363, 9092, 8081, 9090, 9091, 3005],
   "portsAttributes": {
     "8080": { "label": "API Server", "onAutoForward": "notify" },
     "8123": { "label": "ClickHouse HTTP", "onAutoForward": "silent" },
     "9000": { "label": "ClickHouse Native", "onAutoForward": "silent" },
+    "9363": { "label": "ClickHouse Metrics", "onAutoForward": "silent" },
     "9092": { "label": "Kafka", "onAutoForward": "silent" },
     "8081": { "label": "Kafka UI", "onAutoForward": "notify" },
     "9090": { "label": "Prometheus", "onAutoForward": "silent" },

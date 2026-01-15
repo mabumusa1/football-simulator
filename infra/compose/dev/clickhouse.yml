@@ -10,6 +10,7 @@ services:
     ports:
       - "8123:8123"
       - "9000:9000"
+      - "9363:9363"
 
     environment:
       CLICKHOUSE_DB: football_simulator
@@ -20,6 +21,7 @@ services:
     volumes:
       - clickhouse-data:/var/lib/clickhouse
       - ../../clickhouse/init:/docker-entrypoint-initdb.d:ro
+      - ../../clickhouse/config/config.xml:/etc/clickhouse-server/config.d/custom.xml:ro
 
     networks:
       - football-simulator-net
