@@ -3,8 +3,6 @@ description: Real-time football match event streaming and viewer engagement anal
 baseurl: ""
 url: ""
 
-theme: jekyll-theme-minimal
-
 # Build settings
 markdown: kramdown
 highlighter: rouge
