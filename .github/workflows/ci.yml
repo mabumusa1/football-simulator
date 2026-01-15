@@ -9,28 +9,21 @@ on:
 jobs:
   lint:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        working-directory:
+          - apps/api
+          - apps/consumer
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Run linting in devcontainer
-        uses: devcontainers/ci@v0.3
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
         with:
-          runCmd: |
-            echo "=== Installing golangci-lint ==="
-            go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-
-            echo ""
-            echo "=== Linting API ==="
-            cd /workspace/apps/api && golangci-lint run ./...
-
-            echo ""
-            echo "=== Linting Consumer ==="
-            cd /workspace/apps/consumer && golangci-lint run ./...
-
-            echo ""
-            echo "=== Linting passed ==="
+          version: v2.6
+          working-directory: ${{ matrix.working-directory }}
 
   test:
     runs-on: ubuntu-latest
