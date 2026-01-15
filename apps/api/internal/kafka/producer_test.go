@@ -921,7 +921,7 @@ func TestEngagementProducer_ProduceBatch_MultipleUsersAndMatches(t *testing.T) {
 
 func TestNewEventProducer(t *testing.T) {
 	writer := NewWriter([]string{"localhost:9092"}, "test-events")
-	defer writer.Close()
+	defer func() { _ = writer.Close() }()
 
 	// Test with nil logger (should use default)
 	producer := NewEventProducer(writer, nil)
@@ -942,7 +942,7 @@ func TestNewEventProducer(t *testing.T) {
 
 func TestNewEngagementProducer(t *testing.T) {
 	writer := NewEngagementWriter([]string{"localhost:9092"}, "test-engagements")
-	defer writer.Close()
+	defer func() { _ = writer.Close() }()
 
 	// Test with nil logger (should use default)
 	producer := NewEngagementProducer(writer, nil)
@@ -966,7 +966,7 @@ func TestNewWriter(t *testing.T) {
 	topic := "test-topic"
 
 	writer := NewWriter(brokers, topic)
-	defer writer.Close()
+	defer func() { _ = writer.Close() }()
 
 	if writer == nil {
 		t.Fatal("NewWriter() returned nil")
@@ -990,7 +990,7 @@ func TestNewEngagementWriter(t *testing.T) {
 	topic := "test-engagements"
 
 	writer := NewEngagementWriter(brokers, topic)
-	defer writer.Close()
+	defer func() { _ = writer.Close() }()
 
 	if writer == nil {
 		t.Fatal("NewEngagementWriter() returned nil")
@@ -1018,7 +1018,7 @@ func TestNewWriterWithConfig(t *testing.T) {
 	}
 
 	writer := NewWriterWithConfig(cfg)
-	defer writer.Close()
+	defer func() { _ = writer.Close() }()
 
 	if writer == nil {
 		t.Fatal("NewWriterWithConfig() returned nil")

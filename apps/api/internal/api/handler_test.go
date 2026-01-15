@@ -150,7 +150,7 @@ func TestIngestEvent_ValidEvent(t *testing.T) {
 	handler.IngestEvent(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusAccepted {
 		t.Errorf("expected status %d, got %d", http.StatusAccepted, resp.StatusCode)
@@ -184,7 +184,7 @@ func TestIngestEvent_InvalidJSON(t *testing.T) {
 	handler.IngestEvent(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("expected status %d, got %d", http.StatusBadRequest, resp.StatusCode)
@@ -221,7 +221,7 @@ func TestIngestEvent_ValidationError_InvalidEventID(t *testing.T) {
 	handler.IngestEvent(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("expected status %d, got %d", http.StatusBadRequest, resp.StatusCode)
@@ -258,7 +258,7 @@ func TestIngestEvent_ValidationError_MissingMatchID(t *testing.T) {
 	handler.IngestEvent(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("expected status %d, got %d", http.StatusBadRequest, resp.StatusCode)
@@ -295,7 +295,7 @@ func TestIngestEvent_ValidationError_InvalidEventType(t *testing.T) {
 	handler.IngestEvent(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("expected status %d, got %d", http.StatusBadRequest, resp.StatusCode)
@@ -332,7 +332,7 @@ func TestIngestEvent_ValidationError_InvalidTimestamp(t *testing.T) {
 	handler.IngestEvent(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("expected status %d, got %d", http.StatusBadRequest, resp.StatusCode)
@@ -369,7 +369,7 @@ func TestIngestEvent_ValidationError_InvalidTeamID(t *testing.T) {
 	handler.IngestEvent(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("expected status %d, got %d", http.StatusBadRequest, resp.StatusCode)
@@ -403,7 +403,7 @@ func TestIngestEvent_KafkaError(t *testing.T) {
 	handler.IngestEvent(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Errorf("expected status %d, got %d", http.StatusServiceUnavailable, resp.StatusCode)
@@ -454,7 +454,7 @@ func TestIngestEvent_AllEventTypes(t *testing.T) {
 			handler.IngestEvent(w, req)
 
 			resp := w.Result()
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 
 			if resp.StatusCode != http.StatusAccepted {
 				t.Errorf("expected status %d, got %d for event type %s", http.StatusAccepted, resp.StatusCode, eventType)
@@ -476,7 +476,7 @@ func TestIngestEvent_EmptyBody(t *testing.T) {
 	handler.IngestEvent(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("expected status %d, got %d", http.StatusBadRequest, resp.StatusCode)
@@ -509,7 +509,7 @@ func TestIngestEngagements_ValidBatch(t *testing.T) {
 	handler.IngestEngagements(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusAccepted {
 		t.Errorf("expected status %d, got %d", http.StatusAccepted, resp.StatusCode)
@@ -576,7 +576,7 @@ func TestIngestEngagements_PartialFailures(t *testing.T) {
 	handler.IngestEngagements(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusAccepted {
 		t.Errorf("expected status %d, got %d", http.StatusAccepted, resp.StatusCode)
@@ -611,7 +611,7 @@ func TestIngestEngagements_EmptyEvents(t *testing.T) {
 	handler.IngestEngagements(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("expected status %d, got %d", http.StatusBadRequest, resp.StatusCode)
@@ -642,7 +642,7 @@ func TestIngestEngagements_InvalidJSON(t *testing.T) {
 	handler.IngestEngagements(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("expected status %d, got %d", http.StatusBadRequest, resp.StatusCode)
@@ -677,7 +677,7 @@ func TestIngestEngagements_KafkaError(t *testing.T) {
 	handler.IngestEngagements(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Errorf("expected status %d, got %d", http.StatusServiceUnavailable, resp.StatusCode)
@@ -708,7 +708,7 @@ func TestIngestEngagements_NotConfigured(t *testing.T) {
 	handler.IngestEngagements(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Errorf("expected status %d, got %d", http.StatusServiceUnavailable, resp.StatusCode)
@@ -779,7 +779,7 @@ func TestIngestEngagements_MultipleBatchEvents(t *testing.T) {
 	handler.IngestEngagements(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusAccepted {
 		t.Errorf("expected status %d, got %d", http.StatusAccepted, resp.StatusCode)
@@ -844,7 +844,7 @@ func TestGetMatchMetrics_Success(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("expected status %d, got %d", http.StatusOK, resp.StatusCode)
@@ -890,7 +890,7 @@ func TestGetMatchMetrics_NotFound(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("expected status %d, got %d", http.StatusNotFound, resp.StatusCode)
@@ -925,7 +925,7 @@ func TestGetMatchMetrics_NilMetrics(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("expected status %d, got %d", http.StatusNotFound, resp.StatusCode)
@@ -951,7 +951,7 @@ func TestGetMatchMetrics_RepositoryError(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Errorf("expected status %d, got %d", http.StatusInternalServerError, resp.StatusCode)
@@ -994,7 +994,7 @@ func TestGetMatchMetrics_EventsPerMinuteError(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Should still return 200 but without peak engagement data
 	if resp.StatusCode != http.StatusOK {
@@ -1027,7 +1027,7 @@ func TestGetMatchMetrics_MissingMatchID(t *testing.T) {
 	handler.GetMatchMetrics(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("expected status %d, got %d", http.StatusBadRequest, resp.StatusCode)
@@ -1073,7 +1073,7 @@ func TestGetMatchMetrics_WithPeakEngagement(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("expected status %d, got %d", http.StatusOK, resp.StatusCode)
@@ -1110,7 +1110,7 @@ func TestHealthCheck_ReturnsHealthy(t *testing.T) {
 	handler.HealthCheck(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("expected status %d, got %d", http.StatusOK, resp.StatusCode)
@@ -1146,7 +1146,7 @@ func TestHealthCheck_TimestampIsUTC(t *testing.T) {
 	handler.HealthCheck(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var result HealthResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -1182,7 +1182,7 @@ func TestReadinessCheck_AllHealthy(t *testing.T) {
 	handler.ReadinessCheck(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("expected status %d, got %d", http.StatusOK, resp.StatusCode)
@@ -1226,7 +1226,7 @@ func TestReadinessCheck_ClickHouseUnhealthy(t *testing.T) {
 	handler.ReadinessCheck(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Errorf("expected status %d, got %d", http.StatusServiceUnavailable, resp.StatusCode)
@@ -1270,7 +1270,7 @@ func TestReadinessCheck_KafkaUnhealthy(t *testing.T) {
 	handler.ReadinessCheck(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Errorf("expected status %d, got %d", http.StatusServiceUnavailable, resp.StatusCode)
@@ -1319,7 +1319,7 @@ func TestReadinessCheck_BothUnhealthy(t *testing.T) {
 	handler.ReadinessCheck(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Errorf("expected status %d, got %d", http.StatusServiceUnavailable, resp.StatusCode)
@@ -1363,7 +1363,7 @@ func TestReadinessCheck_TimestampIsSet(t *testing.T) {
 	handler.ReadinessCheck(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var result ReadinessResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -1433,7 +1433,7 @@ func TestSwaggerUI(t *testing.T) {
 	SwaggerUI(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("expected status %d, got %d", http.StatusOK, resp.StatusCode)
@@ -1445,7 +1445,7 @@ func TestSwaggerUI(t *testing.T) {
 
 	// Verify response contains expected HTML content
 	buf := new(bytes.Buffer)
-	buf.ReadFrom(resp.Body)
+	_, _ = buf.ReadFrom(resp.Body)
 	body := buf.String()
 
 	if !strings.Contains(body, "swagger-ui") {
@@ -1475,7 +1475,7 @@ info:
 	handler(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("expected status %d, got %d", http.StatusOK, resp.StatusCode)
@@ -1486,7 +1486,7 @@ info:
 	}
 
 	buf := new(bytes.Buffer)
-	buf.ReadFrom(resp.Body)
+	_, _ = buf.ReadFrom(resp.Body)
 	body := buf.String()
 
 	if !strings.Contains(body, "openapi:") {
@@ -1534,7 +1534,7 @@ func TestIngestEvent_WithMetadata(t *testing.T) {
 	handler.IngestEvent(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusAccepted {
 		t.Errorf("expected status %d, got %d", http.StatusAccepted, resp.StatusCode)
@@ -1580,7 +1580,7 @@ func TestIngestEvent_TeamID2(t *testing.T) {
 	handler.IngestEvent(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusAccepted {
 		t.Errorf("expected status %d, got %d", http.StatusAccepted, resp.StatusCode)
@@ -1638,7 +1638,7 @@ func TestIngestEngagements_AllInvalid(t *testing.T) {
 	handler.IngestEngagements(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusAccepted {
 		t.Errorf("expected status %d, got %d", http.StatusAccepted, resp.StatusCode)
@@ -1702,7 +1702,7 @@ func TestIngestEngagements_AllEngagementTypes(t *testing.T) {
 			handler.IngestEngagements(w, req)
 
 			resp := w.Result()
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 
 			if resp.StatusCode != http.StatusAccepted {
 				t.Errorf("expected status %d, got %d for engagement type %s", http.StatusAccepted, resp.StatusCode, engagementType)
@@ -1736,7 +1736,7 @@ func TestGetMatchMetrics_EmptyEventsPerMinute(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("expected status %d, got %d", http.StatusOK, resp.StatusCode)

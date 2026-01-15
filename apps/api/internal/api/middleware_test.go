@@ -17,7 +17,7 @@ func TestAPIKeyAuth_ValidKey(t *testing.T) {
 	// Create a simple handler that returns 200 OK
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("success"))
+		_, _ = w.Write([]byte("success"))
 	})
 
 	// Wrap handler with middleware
@@ -391,7 +391,7 @@ func TestPrometheusMiddleware_RecordsMetrics(t *testing.T) {
 	// Create a test handler that returns a specific status
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
-		w.Write([]byte("created"))
+		_, _ = w.Write([]byte("created"))
 	})
 
 	wrappedHandler := PrometheusMiddleware(handler)
@@ -472,7 +472,7 @@ func TestPrometheusMiddleware_CapturesStatusCode(t *testing.T) {
 func TestPrometheusMiddleware_DefaultStatusCode(t *testing.T) {
 	// Handler that writes body without explicit WriteHeader
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("no explicit status"))
+		_, _ = w.Write([]byte("no explicit status"))
 	})
 
 	wrappedHandler := PrometheusMiddleware(handler)
@@ -562,7 +562,7 @@ func TestResponseWriter_WriteAfterWriteHeader(t *testing.T) {
 	wrapped := newResponseWriter(rr)
 
 	wrapped.WriteHeader(http.StatusAccepted)
-	wrapped.Write([]byte("accepted"))
+	_, _ = wrapped.Write([]byte("accepted"))
 
 	if rr.Code != http.StatusAccepted {
 		t.Errorf("responseWriter Code = %d, want %d", rr.Code, http.StatusAccepted)

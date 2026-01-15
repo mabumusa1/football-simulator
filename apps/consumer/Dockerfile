@@ -20,8 +20,8 @@ WORKDIR /app
 COPY --from=builder /app/consumer .
 RUN chown -R gouser:appgroup /app
 USER gouser
-EXPOSE 8080
+EXPOSE 9091
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=5 \
-    CMD wget -q --spider http://localhost:8080/health || exit 1
+    CMD wget -q --spider http://localhost:9091/metrics || exit 1
 
 CMD ["./consumer"]

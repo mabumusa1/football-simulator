@@ -150,13 +150,7 @@ func (r *EngagementEventRequest) ToEngagementEvent() (*EngagementEvent, error) {
 		return nil, NewValidationError("engagement_type", "must be a valid engagement type")
 	}
 
-	// Validate subtype (optional, but if provided must be valid)
-	if r.EngagementSubtype != "" {
-		subtypes := EngagementSubtypes[engagementType]
-		if subtypes != nil && !subtypes[r.EngagementSubtype] {
-			// Allow unknown subtypes but log them
-		}
-	}
+	// Subtype validation: subtypes are optional and unknown subtypes are allowed
 
 	// Parse related game event ID if provided
 	var relatedGameEventID *uuid.UUID

@@ -231,7 +231,7 @@ func (p *EventProducer) Ping(ctx context.Context) error {
 		)
 		return fmt.Errorf("kafka ping failed: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// Verify connectivity by fetching broker metadata
 	_, err = conn.Brokers()
@@ -467,7 +467,7 @@ func (p *EngagementProducer) Ping(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("engagement kafka ping failed: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	_, err = conn.Brokers()
 	if err != nil {

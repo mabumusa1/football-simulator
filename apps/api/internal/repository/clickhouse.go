@@ -150,7 +150,7 @@ func (r *ClickHouseRepository) GetMatchMetrics(ctx context.Context, matchID stri
 		clickhouseQueryDuration.WithLabelValues("get_match_metrics").Observe(duration.Seconds())
 		return nil, fmt.Errorf("failed to query events by type: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var eventType string
@@ -216,7 +216,7 @@ func (r *ClickHouseRepository) GetEventsPerMinute(ctx context.Context, matchID s
 		clickhouseQueryDuration.WithLabelValues("get_events_per_minute").Observe(duration.Seconds())
 		return nil, fmt.Errorf("failed to query events per minute: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var results []domain.EventsPerMinute
 	for rows.Next() {

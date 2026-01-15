@@ -143,7 +143,7 @@ func (c *AppContext) Shutdown(ctx context.Context) error {
 		c.Logger.Info("Closing Kafka producer")
 		if err := c.Producer.Close(); err != nil {
 			c.Logger.Error("Kafka producer close error", slog.String("error", err.Error()))
-			errs = append(errs, fmt.Errorf("Kafka producer close: %w", err))
+			errs = append(errs, fmt.Errorf("kafka producer close: %w", err))
 		}
 	}
 

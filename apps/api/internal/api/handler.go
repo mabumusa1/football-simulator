@@ -242,7 +242,7 @@ func (h *Handler) ReadinessCheck(w http.ResponseWriter, r *http.Request) {
 func SwaggerUI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(swaggerUIHTML))
+	_, _ = w.Write([]byte(swaggerUIHTML))
 }
 
 // ServeOpenAPISpec handles GET /openapi.yaml and serves the OpenAPI specification.
@@ -250,7 +250,7 @@ func ServeOpenAPISpec(spec []byte) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/x-yaml")
 		w.WriteHeader(http.StatusOK)
-		w.Write(spec)
+		_, _ = w.Write(spec)
 	}
 }
 
