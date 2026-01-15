@@ -11,8 +11,7 @@
   "workspaceFolder": "/workspace",
 
   "features": {
-    "ghcr.io/devcontainers/features/github-cli:1": {},
-    "ghcr.io/devcontainers/features/python:1":{}
+    "ghcr.io/devcontainers/features/github-cli:1": {}
   },
 
   "customizations": {

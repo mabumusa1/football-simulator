@@ -1,6 +1,8 @@
 services:
   app:
-    image: mcr.microsoft.com/devcontainers/go:1
+    build:
+      context: ../../..
+      dockerfile: .devcontainer/Dockerfile
 
     command: sleep infinity
 
