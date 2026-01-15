@@ -47,8 +47,16 @@ func main() {
 
 	// Create Kafka producer for event ingestion
 	producer := kafka.NewEventProducer(appCtx.Producer, logger)
-	logger.Info("Kafka producer created",
+	logger.Info("Kafka event producer created",
 		slog.String("topic", cfg.Kafka.TopicEvents),
+	)
+
+	// Create Kafka producer for engagement ingestion
+	brokers := []string{cfg.Kafka.BootstrapServers}
+	engagementWriter := kafka.NewEngagementWriter(brokers, cfg.Kafka.TopicEngagements)
+	engagementProducer := kafka.NewEngagementProducer(engagementWriter, logger)
+	logger.Info("Kafka engagement producer created",
+		slog.String("topic", cfg.Kafka.TopicEngagements),
 	)
 
 	// Create ClickHouse repository for metrics queries
@@ -58,7 +66,7 @@ func main() {
 	)
 
 	// Create HTTP router with dependencies
-	router := api.NewRouter(producer, repo, logger, cfg.APIKey, openAPISpec)
+	router := api.NewRouter(producer, engagementProducer, repo, logger, cfg.APIKey, openAPISpec)
 	logger.Info("HTTP router created")
 
 	// Configure HTTP server with timeouts from config

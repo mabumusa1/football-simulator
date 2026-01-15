@@ -25,12 +25,13 @@ type ServerConfig struct {
 
 // KafkaConfig holds Kafka connection and topic settings.
 type KafkaConfig struct {
-	BootstrapServers string
-	TopicPrefix      string
-	TopicEvents      string
-	TopicRetry       string
-	TopicDead        string
-	ProducerTimeout  time.Duration
+	BootstrapServers  string
+	TopicPrefix       string
+	TopicEvents       string
+	TopicEngagements  string
+	TopicRetry        string
+	TopicDead         string
+	ProducerTimeout   time.Duration
 }
 
 // ClickHouseConfig holds ClickHouse connection settings.
@@ -56,6 +57,7 @@ func LoadConfig() *Config {
 			BootstrapServers: getEnv("KAFKA_BOOTSTRAP_SERVERS", "kafka:29092"),
 			TopicPrefix:      getEnv("KAFKA_TOPIC_PREFIX", "football_simulator"),
 			TopicEvents:      getEnv("KAFKA_TOPIC_EVENTS", "football_simulator.events"),
+			TopicEngagements: getEnv("KAFKA_TOPIC_ENGAGEMENTS", "football_simulator.engagements"),
 			TopicRetry:       getEnv("KAFKA_TOPIC_RETRY", "football_simulator.retry"),
 			TopicDead:        getEnv("KAFKA_TOPIC_DEAD", "football_simulator.dead"),
 			ProducerTimeout:  getEnvDuration("KAFKA_PRODUCER_TIMEOUT", 10*time.Second),

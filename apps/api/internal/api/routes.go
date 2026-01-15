@@ -11,7 +11,7 @@ import (
 )
 
 // NewRouter creates and configures a new chi router with all routes and middleware.
-func NewRouter(producer EventProducer, repository MetricsRepository, logger *slog.Logger, apiKey string, openAPISpec []byte) *chi.Mux {
+func NewRouter(producer EventProducer, engagementProducer EngagementProducer, repository MetricsRepository, logger *slog.Logger, apiKey string, openAPISpec []byte) *chi.Mux {
 	r := chi.NewRouter()
 
 	// Apply middleware stack
@@ -22,8 +22,8 @@ func NewRouter(producer EventProducer, repository MetricsRepository, logger *slo
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(30 * time.Second))
 
-	// Create handler
-	h := NewHandler(producer, repository)
+	// Create handler with engagement producer support
+	h := NewHandlerWithEngagement(producer, engagementProducer, repository)
 
 	// Swagger UI at root
 	r.Get("/", SwaggerUI)
@@ -55,8 +55,8 @@ func NewRouter(producer EventProducer, repository MetricsRepository, logger *slo
 }
 
 // NewServer creates a new HTTP server with the configured router.
-func NewServer(addr string, producer EventProducer, repository MetricsRepository, logger *slog.Logger, apiKey string, openAPISpec []byte) *http.Server {
-	router := NewRouter(producer, repository, logger, apiKey, openAPISpec)
+func NewServer(addr string, producer EventProducer, engagementProducer EngagementProducer, repository MetricsRepository, logger *slog.Logger, apiKey string, openAPISpec []byte) *http.Server {
+	router := NewRouter(producer, engagementProducer, repository, logger, apiKey, openAPISpec)
 
 	return &http.Server{
 		Addr:         addr,
