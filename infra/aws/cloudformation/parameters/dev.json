@@ -1,0 +1,42 @@
+[
+  {
+    "ParameterKey": "Domain",
+    "ParameterValue": "REPLACE_WITH_YOUR_DOMAIN"
+  },
+  {
+    "ParameterKey": "LetsEncryptEmail",
+    "ParameterValue": "REPLACE_WITH_YOUR_EMAIL"
+  },
+  {
+    "ParameterKey": "InstanceType",
+    "ParameterValue": "r5.xlarge"
+  },
+  {
+    "ParameterKey": "KeyPairName",
+    "ParameterValue": "REPLACE_WITH_YOUR_KEYPAIR"
+  },
+  {
+    "ParameterKey": "SSHAccessCIDR",
+    "ParameterValue": "0.0.0.0/0"
+  },
+  {
+    "ParameterKey": "EBSVolumeSize",
+    "ParameterValue": "300"
+  },
+  {
+    "ParameterKey": "EBSVolumeIOPS",
+    "ParameterValue": "6000"
+  },
+  {
+    "ParameterKey": "EBSThroughput",
+    "ParameterValue": "500"
+  },
+  {
+    "ParameterKey": "Environment",
+    "ParameterValue": "development"
+  },
+  {
+    "ParameterKey": "GitRepoURL",
+    "ParameterValue": ""
+  }
+]

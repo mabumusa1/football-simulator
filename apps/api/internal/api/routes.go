@@ -41,8 +41,11 @@ func NewRouter(producer EventProducer, repository MetricsRepository, logger *slo
 		// Apply API key authentication middleware to all /api routes
 		r.Use(APIKeyAuth(apiKey))
 
-		// Event ingestion
+		// Event ingestion (game events on the field)
 		r.Post("/events", h.IngestEvent)
+
+		// Engagement ingestion (viewer engagement events)
+		r.Post("/engagements", h.IngestEngagements)
 
 		// Match metrics
 		r.Get("/matches/{matchId}/metrics", h.GetMatchMetrics)

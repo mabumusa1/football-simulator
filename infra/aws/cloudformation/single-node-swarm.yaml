@@ -1,0 +1,1065 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: |
+  Single-node Docker Swarm deployment for Fanfinity Football Event Streaming Infrastructure.
+  Deploys: Go API, Go Consumer, Kafka, ClickHouse, Prometheus, Grafana, Traefik.
+  Optimized for high throughput (10K+ events/min).
+
+# =============================================================================
+# METADATA
+# =============================================================================
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "Domain & SSL Configuration"
+        Parameters:
+          - Domain
+          - LetsEncryptEmail
+      - Label:
+          default: "EC2 Instance Configuration"
+        Parameters:
+          - InstanceType
+          - KeyPairName
+          - SSHAccessCIDR
+      - Label:
+          default: "Storage Configuration"
+        Parameters:
+          - EBSVolumeSize
+          - EBSVolumeIOPS
+          - EBSThroughput
+      - Label:
+          default: "Application Configuration"
+        Parameters:
+          - Environment
+          - GitRepoURL
+    ParameterLabels:
+      Domain:
+        default: "Domain Name"
+      LetsEncryptEmail:
+        default: "Let's Encrypt Email"
+      InstanceType:
+        default: "EC2 Instance Type"
+      KeyPairName:
+        default: "SSH Key Pair Name"
+
+# =============================================================================
+# PARAMETERS
+# =============================================================================
+Parameters:
+  # Domain Configuration
+  Domain:
+    Type: String
+    Description: Domain name for the application (e.g., fanfinity.example.com)
+    AllowedPattern: ^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]\.[a-zA-Z]{2,}$
+    ConstraintDescription: Must be a valid domain name
+
+  LetsEncryptEmail:
+    Type: String
+    Description: Email address for Let's Encrypt SSL certificate notifications
+    AllowedPattern: ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$
+    ConstraintDescription: Must be a valid email address
+
+  # EC2 Configuration
+  InstanceType:
+    Type: String
+    Default: r5.xlarge
+    AllowedValues:
+      - t3.xlarge      # 4 vCPU, 16 GB - minimum for testing
+      - t3.2xlarge     # 8 vCPU, 32 GB - budget option
+      - r5.xlarge      # 4 vCPU, 32 GB - recommended
+      - r5.2xlarge     # 8 vCPU, 64 GB - high headroom
+      - r6i.xlarge     # 4 vCPU, 32 GB - newer generation
+      - r6i.2xlarge    # 8 vCPU, 64 GB - newer generation
+    Description: |
+      EC2 instance type. r5.xlarge (32GB RAM) recommended for 10K events/min.
+      Memory-optimized instances (r5/r6i) are best for Kafka and ClickHouse workloads.
+
+  KeyPairName:
+    Type: String
+    Description: |
+      Name of an existing EC2 Key Pair for SSH access.
+      Create one in EC2 Console > Key Pairs before deploying.
+    AllowedPattern: ^[a-zA-Z0-9_-]+$
+    ConstraintDescription: Must be a valid key pair name
+
+  SSHAccessCIDR:
+    Type: String
+    Default: 0.0.0.0/0
+    Description: |
+      CIDR block allowed for SSH access.
+      Use your IP (e.g., 203.0.113.50/32) for better security, or 0.0.0.0/0 for any IP.
+    AllowedPattern: ^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$
+    ConstraintDescription: Must be a valid CIDR block (e.g., 0.0.0.0/0 or 192.168.1.0/24)
+
+  # Storage Configuration
+  EBSVolumeSize:
+    Type: Number
+    Default: 300
+    MinValue: 100
+    MaxValue: 16384
+    Description: EBS volume size in GB. 300GB recommended for dev/test with high throughput.
+
+  EBSVolumeIOPS:
+    Type: Number
+    Default: 6000
+    MinValue: 3000
+    MaxValue: 16000
+    Description: |
+      Provisioned IOPS for gp3 volume. 6000 IOPS recommended for ClickHouse workloads.
+      Baseline is 3000 IOPS included free with gp3.
+
+  EBSThroughput:
+    Type: Number
+    Default: 500
+    MinValue: 125
+    MaxValue: 1000
+    Description: |
+      Throughput in MiB/s for gp3 volume. 500 MiB/s recommended for ClickHouse merge operations.
+      Baseline is 125 MiB/s included free with gp3.
+
+  # Environment Configuration
+  Environment:
+    Type: String
+    Default: development
+    AllowedValues:
+      - development
+      - staging
+      - production
+    Description: Deployment environment tag
+
+  GitRepoURL:
+    Type: String
+    Default: ''
+    Description: (Optional) Git repository URL to clone. Leave empty to clone manually.
+
+# =============================================================================
+# MAPPINGS - AMI IDs by Region (Amazon Linux 2023)
+# =============================================================================
+Mappings:
+  RegionAMI:
+    us-east-1:
+      AMI: ami-0c02fb55956c7d316
+    us-east-2:
+      AMI: ami-0ea3c35c5c3284d82
+    us-west-1:
+      AMI: ami-0ed7f6f4f3dfa7b14
+    us-west-2:
+      AMI: ami-0892d3c7ee96c0bf7
+    eu-west-1:
+      AMI: ami-0905a3c97561e0b69
+    eu-west-2:
+      AMI: ami-0e5f882be1900e43b
+    eu-central-1:
+      AMI: ami-0faab6bdbac9486fb
+    ap-southeast-1:
+      AMI: ami-0bd6906508e74f692
+    ap-southeast-2:
+      AMI: ami-0310483fb2b488153
+    ap-northeast-1:
+      AMI: ami-0bba69335379e17f8
+
+# =============================================================================
+# RESOURCES
+# =============================================================================
+Resources:
+
+  # ---------------------------------------------------------------------------
+  # VPC AND NETWORKING
+  # ---------------------------------------------------------------------------
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-vpc
+        - Key: Environment
+          Value: !Ref Environment
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-igw
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select
+        - 0
+        - !GetAZs ''
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-public-subnet
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-public-rt
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  # ---------------------------------------------------------------------------
+  # SECURITY GROUP
+  # ---------------------------------------------------------------------------
+  SwarmSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Docker Swarm single-node deployment
+      GroupName: !Sub ${AWS::StackName}-sg
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        # SSH Access (restricted by parameter)
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref SSHAccessCIDR
+          Description: SSH access
+        # HTTP (for Let's Encrypt ACME challenge)
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: HTTP for Let's Encrypt ACME challenge
+        # HTTPS (main application traffic via Traefik)
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS traffic via Traefik
+        # Traefik Dashboard/Metrics (optional - can be accessed via HTTPS subdomain)
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: !Ref SSHAccessCIDR
+          Description: Traefik dashboard (restricted)
+        # Prometheus (optional - can be accessed via HTTPS subdomain)
+        - IpProtocol: tcp
+          FromPort: 9090
+          ToPort: 9090
+          CidrIp: !Ref SSHAccessCIDR
+          Description: Prometheus web UI (restricted)
+        # Grafana (optional - can be accessed via HTTPS subdomain)
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          CidrIp: !Ref SSHAccessCIDR
+          Description: Grafana web UI (restricted)
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-sg
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ---------------------------------------------------------------------------
+  # IAM ROLE AND INSTANCE PROFILE
+  # ---------------------------------------------------------------------------
+  EC2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-ec2-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        # SSM for remote management without SSH
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        # CloudWatch for logs and metrics
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+      Policies:
+        # ECR read-only for pulling Docker images
+        - PolicyName: ECRReadOnly
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                Resource: '*'
+        # CloudFormation signal permissions
+        - PolicyName: CFNSignal
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudformation:SignalResource
+                Resource: !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${AWS::StackName}/*
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-ec2-role
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub ${AWS::StackName}-instance-profile
+      Roles:
+        - !Ref EC2Role
+
+  # ---------------------------------------------------------------------------
+  # ELASTIC IP
+  # ---------------------------------------------------------------------------
+  ElasticIP:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-eip
+        - Key: Environment
+          Value: !Ref Environment
+
+  ElasticIPAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt ElasticIP.AllocationId
+      InstanceId: !Ref SwarmInstance
+
+  # ---------------------------------------------------------------------------
+  # CLOUDWATCH LOG GROUPS
+  # ---------------------------------------------------------------------------
+  UserDataLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /${AWS::StackName}/user-data
+      RetentionInDays: 30
+
+  DockerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /${AWS::StackName}/docker
+      RetentionInDays: 30
+
+  # ---------------------------------------------------------------------------
+  # ECR REPOSITORIES (for GitHub CI/CD)
+  # ---------------------------------------------------------------------------
+  GoApiRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub ${AWS::StackName}/go-api
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      ImageTagMutability: IMMUTABLE
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep last 10 tagged images",
+                "selection": {
+                  "tagStatus": "tagged",
+                  "tagPrefixList": ["v"],
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 10
+                },
+                "action": {
+                  "type": "expire"
+                }
+              },
+              {
+                "rulePriority": 2,
+                "description": "Delete untagged images older than 7 days",
+                "selection": {
+                  "tagStatus": "untagged",
+                  "countType": "sinceImagePushed",
+                  "countUnit": "days",
+                  "countNumber": 7
+                },
+                "action": {
+                  "type": "expire"
+                }
+              }
+            ]
+          }
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  GoConsumerRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub ${AWS::StackName}/go-consumer
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      ImageTagMutability: IMMUTABLE
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep last 10 tagged images",
+                "selection": {
+                  "tagStatus": "tagged",
+                  "tagPrefixList": ["v"],
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 10
+                },
+                "action": {
+                  "type": "expire"
+                }
+              },
+              {
+                "rulePriority": 2,
+                "description": "Delete untagged images older than 7 days",
+                "selection": {
+                  "tagStatus": "untagged",
+                  "countType": "sinceImagePushed",
+                  "countUnit": "days",
+                  "countNumber": 7
+                },
+                "action": {
+                  "type": "expire"
+                }
+              }
+            ]
+          }
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ---------------------------------------------------------------------------
+  # GITHUB ACTIONS OIDC (Secure CI/CD without access keys)
+  # ---------------------------------------------------------------------------
+  GitHubOIDCProvider:
+    Type: AWS::IAM::OIDCIdentityProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      ThumbprintList:
+        - 6938fd4d98bab03faadb97b34396831e3780aea1
+        - 1c58a3a8518e8759bf075b76b750d4f2df264fcd
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-github-oidc
+
+  GitHubActionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-github-actions
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref GitHubOIDCProvider
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringLike:
+                token.actions.githubusercontent.com:sub: !Sub repo:*:*
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+      Policies:
+        - PolicyName: ECRPushPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                  - ecr:PutImage
+                  - ecr:InitiateLayerUpload
+                  - ecr:UploadLayerPart
+                  - ecr:CompleteLayerUpload
+                Resource:
+                  - !GetAtt GoApiRepository.Arn
+                  - !GetAtt GoConsumerRepository.Arn
+        - PolicyName: SSMDeployPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:SendCommand
+                  - ssm:GetCommandInvocation
+                Resource:
+                  - !Sub arn:aws:ssm:${AWS::Region}::document/AWS-RunShellScript
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/${SwarmInstance}
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-github-actions-role
+
+  # ---------------------------------------------------------------------------
+  # EC2 INSTANCE
+  # ---------------------------------------------------------------------------
+  SwarmInstance:
+    Type: AWS::EC2::Instance
+    DependsOn:
+      - InternetGatewayAttachment
+      - UserDataLogGroup
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: !FindInMap [RegionAMI, !Ref 'AWS::Region', AMI]
+      KeyName: !Ref KeyPairName
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds:
+        - !Ref SwarmSecurityGroup
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: !Ref EBSVolumeSize
+            VolumeType: gp3
+            Iops: !Ref EBSVolumeIOPS
+            Throughput: !Ref EBSThroughput
+            DeleteOnTermination: true
+            Encrypted: true
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+
+          # =================================================================
+          # USER DATA SCRIPT - Docker Swarm Setup for Fanfinity Infrastructure
+          # =================================================================
+
+          # Log all output to file and console
+          exec > >(tee /var/log/user-data.log | logger -t user-data -s 2>/dev/console) 2>&1
+
+          echo "=========================================="
+          echo "Starting Docker Swarm Setup"
+          echo "Timestamp: $(date)"
+          echo "Instance Type: ${InstanceType}"
+          echo "Region: ${AWS::Region}"
+          echo "=========================================="
+
+          # ------------------------------------------------------------------
+          # SYSTEM UPDATES
+          # ------------------------------------------------------------------
+          echo "[1/8] Updating system packages..."
+          dnf update -y
+
+          # ------------------------------------------------------------------
+          # INSTALL DOCKER
+          # ------------------------------------------------------------------
+          echo "[2/8] Installing Docker..."
+          dnf install -y docker
+          systemctl enable docker
+          systemctl start docker
+
+          # Add ec2-user to docker group
+          usermod -aG docker ec2-user
+
+          # Verify Docker installation
+          docker --version
+
+          # ------------------------------------------------------------------
+          # INSTALL DOCKER COMPOSE V2
+          # ------------------------------------------------------------------
+          echo "[3/8] Installing Docker Compose v2..."
+          DOCKER_CONFIG=/usr/local/lib/docker
+          mkdir -p $DOCKER_CONFIG/cli-plugins
+          curl -SL https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64 \
+            -o $DOCKER_CONFIG/cli-plugins/docker-compose
+          chmod +x $DOCKER_CONFIG/cli-plugins/docker-compose
+          ln -sf $DOCKER_CONFIG/cli-plugins/docker-compose /usr/local/bin/docker-compose
+
+          # Verify Docker Compose installation
+          docker compose version
+
+          # ------------------------------------------------------------------
+          # INSTALL ADDITIONAL TOOLS
+          # ------------------------------------------------------------------
+          echo "[4/8] Installing additional tools..."
+          dnf install -y git jq htop
+
+          # Install CloudWatch agent
+          dnf install -y amazon-cloudwatch-agent
+
+          # Configure CloudWatch agent
+          cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json << 'CWCONFIG'
+          {
+            "agent": {
+              "metrics_collection_interval": 60,
+              "run_as_user": "root"
+            },
+            "logs": {
+              "logs_collected": {
+                "files": {
+                  "collect_list": [
+                    {
+                      "file_path": "/var/log/user-data.log",
+                      "log_group_name": "/${AWS::StackName}/user-data",
+                      "log_stream_name": "{instance_id}",
+                      "timezone": "UTC"
+                    },
+                    {
+                      "file_path": "/var/log/docker",
+                      "log_group_name": "/${AWS::StackName}/docker",
+                      "log_stream_name": "{instance_id}",
+                      "timezone": "UTC"
+                    }
+                  ]
+                }
+              }
+            },
+            "metrics": {
+              "namespace": "${AWS::StackName}",
+              "metrics_collected": {
+                "disk": {
+                  "measurement": ["used_percent", "inodes_free"],
+                  "resources": ["/", "/var/lib/docker"],
+                  "metrics_collection_interval": 60
+                },
+                "mem": {
+                  "measurement": ["mem_used_percent", "mem_available"],
+                  "metrics_collection_interval": 60
+                },
+                "cpu": {
+                  "measurement": ["cpu_usage_idle", "cpu_usage_user", "cpu_usage_system"],
+                  "metrics_collection_interval": 60
+                }
+              }
+            }
+          }
+          CWCONFIG
+
+          /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
+            -a fetch-config -m ec2 -s \
+            -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+
+          # ------------------------------------------------------------------
+          # SYSTEM TUNING FOR HIGH THROUGHPUT
+          # ------------------------------------------------------------------
+          echo "[5/8] Configuring system for high throughput..."
+
+          cat >> /etc/sysctl.conf << 'SYSCTL'
+          # =================================================================
+          # System Tuning for High-Throughput Event Processing
+          # =================================================================
+
+          # Network tuning
+          net.core.somaxconn = 65535
+          net.core.netdev_max_backlog = 65535
+          net.ipv4.tcp_max_syn_backlog = 65535
+          net.ipv4.ip_local_port_range = 1024 65535
+          net.ipv4.tcp_tw_reuse = 1
+          net.ipv4.tcp_fin_timeout = 15
+          net.core.rmem_max = 16777216
+          net.core.wmem_max = 16777216
+          net.ipv4.tcp_rmem = 4096 12582912 16777216
+          net.ipv4.tcp_wmem = 4096 12582912 16777216
+
+          # Increase file descriptors (required for ClickHouse and Kafka)
+          fs.file-max = 2097152
+
+          # VM tuning for ClickHouse
+          vm.max_map_count = 262144
+          vm.swappiness = 10
+          vm.dirty_ratio = 60
+          vm.dirty_background_ratio = 2
+
+          # Disable IPv6 if not needed
+          net.ipv6.conf.all.disable_ipv6 = 1
+          net.ipv6.conf.default.disable_ipv6 = 1
+          SYSCTL
+
+          sysctl -p
+
+          # Increase file descriptor limits
+          cat >> /etc/security/limits.conf << 'LIMITS'
+          # File descriptor limits for Docker services
+          *         soft    nofile      262144
+          *         hard    nofile      262144
+          root      soft    nofile      262144
+          root      hard    nofile      262144
+          ec2-user  soft    nofile      262144
+          ec2-user  hard    nofile      262144
+          LIMITS
+
+          # ------------------------------------------------------------------
+          # INITIALIZE DOCKER SWARM
+          # ------------------------------------------------------------------
+          echo "[6/8] Initializing Docker Swarm..."
+
+          # Get public and private IPs from EC2 metadata
+          TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+          PUBLIC_IP=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/public-ipv4)
+          PRIVATE_IP=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/local-ipv4)
+
+          echo "Public IP: $PUBLIC_IP"
+          echo "Private IP: $PRIVATE_IP"
+
+          # Initialize Swarm with public IP for external access
+          docker swarm init --advertise-addr $PUBLIC_IP
+
+          # Add node labels for placement constraints
+          NODE_ID=$(docker node ls -q)
+          docker node update --label-add clickhouse=true $NODE_ID
+          docker node update --label-add kafka=true $NODE_ID
+          docker node update --label-add role=manager $NODE_ID
+
+          echo "Docker Swarm initialized successfully!"
+          docker node ls
+
+          # ------------------------------------------------------------------
+          # CREATE APPLICATION DIRECTORY AND ENVIRONMENT FILE
+          # ------------------------------------------------------------------
+          echo "[7/8] Setting up application directory..."
+
+          mkdir -p /opt/fanfinity
+          chown ec2-user:ec2-user /opt/fanfinity
+          cd /opt/fanfinity
+
+          # Generate secure random passwords
+          CLICKHOUSE_PASS=$(openssl rand -hex 16)
+          GRAFANA_PASS=$(openssl rand -hex 16)
+          API_KEY=$(openssl rand -hex 32)
+          TRAEFIK_PASS=$(openssl rand -hex 8)
+          PROMETHEUS_PASS=$(openssl rand -hex 8)
+
+          # Generate htpasswd hashes (escape $ for docker-compose)
+          TRAEFIK_AUTH="admin:$(openssl passwd -apr1 $TRAEFIK_PASS | sed 's/\$/\$\$/g')"
+          PROMETHEUS_AUTH="admin:$(openssl passwd -apr1 $PROMETHEUS_PASS | sed 's/\$/\$\$/g')"
+
+          # Create .env file with all required variables
+          cat > /opt/fanfinity/.env << ENVFILE
+          # =============================================================================
+          # Fanfinity Infrastructure - Generated Environment Variables
+          # Generated: $(date)
+          # Stack: ${AWS::StackName}
+          # =============================================================================
+
+          # Domain & SSL
+          DOMAIN=${Domain}
+          LETSENCRYPT_EMAIL=${LetsEncryptEmail}
+
+          # Docker Registry (ECR)
+          REGISTRY=${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${AWS::StackName}
+          VERSION=latest
+
+          # Authentication (auto-generated)
+          TRAEFIK_AUTH=$TRAEFIK_AUTH
+          PROMETHEUS_AUTH=$PROMETHEUS_AUTH
+          GRAFANA_PASSWORD=$GRAFANA_PASS
+          API_KEY=$API_KEY
+
+          # API Service
+          SERVER_HOST=0.0.0.0
+          SERVER_PORT=8080
+          SERVER_READ_TIMEOUT=10s
+          SERVER_WRITE_TIMEOUT=10s
+          SERVER_IDLE_TIMEOUT=60s
+
+          # Kafka Configuration
+          KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+          KAFKA_BROKERS=kafka:9092
+          KAFKA_TOPIC_PREFIX=football_simulator
+          KAFKA_TOPIC_EVENTS=football_simulator.events
+          KAFKA_TOPIC_RETRY=football_simulator.retry
+          KAFKA_TOPIC_DEAD=football_simulator.dead
+          KAFKA_PRODUCER_TIMEOUT=10s
+          KAFKA_TOPIC=api_events
+          KAFKA_TOPICS=api_events
+          KAFKA_GROUP_ID=clickhouse-writer
+
+          # ClickHouse Database
+          CLICKHOUSE_HOST=clickhouse
+          CLICKHOUSE_PORT=9000
+          CLICKHOUSE_DATABASE=football_simulator
+          CLICKHOUSE_USER=default
+          CLICKHOUSE_PASSWORD=$CLICKHOUSE_PASS
+          CLICKHOUSE_DB=football_simulator
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
+
+          # Consumer Service
+          CONSUMER_GROUP=football_simulator-consumers
+          CONSUMER_BATCH_SIZE=1000
+          CONSUMER_FLUSH_INTERVAL=5s
+          CONSUMER_MAX_RETRIES=3
+          CONSUMER_RETRY_BACKOFF=1s
+          BATCH_SIZE=1000
+          FLUSH_INTERVAL=5s
+
+          # Grafana
+          GF_SECURITY_ADMIN_USER=admin
+          GF_SECURITY_ADMIN_PASSWORD=$GRAFANA_PASS
+          GF_USERS_ALLOW_SIGN_UP=false
+          GF_AUTH_ANONYMOUS_ENABLED=false
+          GF_SERVER_ROOT_URL=https://grafana.${Domain}
+          GF_SECURITY_COOKIE_SECURE=true
+          GF_INSTALL_PLUGINS=grafana-clickhouse-datasource
+
+          # Kafka Internal Configuration
+          KAFKA_NODE_ID=1
+          KAFKA_PROCESS_ROLES=broker,controller
+          KAFKA_LISTENERS=PLAINTEXT://0.0.0.0:29092,CONTROLLER://0.0.0.0:29093,EXTERNAL://0.0.0.0:9092
+          KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:29092,EXTERNAL://localhost:9092
+          KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER
+          KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+          KAFKA_CONTROLLER_QUORUM_VOTERS=1@kafka:29093
+          KAFKA_INTER_BROKER_LISTENER_NAME=PLAINTEXT
+          CLUSTER_ID=MkU3OEVBNTcwNTJENDM2Qk
+          KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
+          KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1
+          KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1
+          KAFKA_AUTO_CREATE_TOPICS_ENABLE=true
+          KAFKA_NUM_PARTITIONS=3
+          KAFKA_LOG_RETENTION_HOURS=168
+
+          # Load Testing
+          API_URL=http://go-api:8080
+          K6_PROMETHEUS_RW_SERVER_URL=http://prometheus:9090/api/v1/write
+          ENVFILE
+
+          chown ec2-user:ec2-user /opt/fanfinity/.env
+          chmod 600 /opt/fanfinity/.env
+
+          # Save credentials to a separate file for easy reference
+          cat > /opt/fanfinity/credentials.txt << CREDS
+          =============================================================================
+          Fanfinity Infrastructure - Generated Credentials
+          Generated: $(date)
+          =============================================================================
+
+          Grafana:
+            URL: https://grafana.${Domain}
+            Username: admin
+            Password: $GRAFANA_PASS
+
+          Traefik Dashboard:
+            URL: https://traefik.${Domain}
+            Username: admin
+            Password: $TRAEFIK_PASS
+
+          Prometheus:
+            URL: https://prometheus.${Domain}
+            Username: admin
+            Password: $PROMETHEUS_PASS
+
+          API:
+            URL: https://api.${Domain}
+            API Key: $API_KEY
+
+          ClickHouse:
+            Host: clickhouse (internal only)
+            Port: 9000
+            Database: football_simulator
+            User: default
+            Password: $CLICKHOUSE_PASS
+
+          =============================================================================
+          CREDS
+
+          chown ec2-user:ec2-user /opt/fanfinity/credentials.txt
+          chmod 600 /opt/fanfinity/credentials.txt
+
+          # ------------------------------------------------------------------
+          # CLONE REPOSITORY (if URL provided)
+          # ------------------------------------------------------------------
+          if [ -n "${GitRepoURL}" ]; then
+            echo "Cloning repository: ${GitRepoURL}"
+            git clone ${GitRepoURL} /opt/fanfinity/app
+            chown -R ec2-user:ec2-user /opt/fanfinity/app
+          fi
+
+          # ------------------------------------------------------------------
+          # SIGNAL CLOUDFORMATION SUCCESS
+          # ------------------------------------------------------------------
+          echo "[8/8] Signaling CloudFormation..."
+
+          /opt/aws/bin/cfn-signal -e $? \
+            --stack ${AWS::StackName} \
+            --resource SwarmInstance \
+            --region ${AWS::Region}
+
+          echo "=========================================="
+          echo "Docker Swarm Setup Complete!"
+          echo "Timestamp: $(date)"
+          echo "=========================================="
+          echo ""
+          echo "Next Steps:"
+          echo "1. Create DNS A records pointing to: $PUBLIC_IP"
+          echo "   - api.${Domain}"
+          echo "   - grafana.${Domain}"
+          echo "   - prometheus.${Domain}"
+          echo "   - traefik.${Domain}"
+          echo ""
+          echo "2. Clone your repository (if not auto-cloned):"
+          echo "   cd /opt/fanfinity && git clone <repo-url> app"
+          echo ""
+          echo "3. Copy .env file and deploy:"
+          echo "   cd /opt/fanfinity/app"
+          echo "   cp /opt/fanfinity/.env ."
+          echo "   ./scripts/deploy.sh"
+          echo ""
+          echo "4. View generated credentials:"
+          echo "   cat /opt/fanfinity/credentials.txt"
+          echo ""
+          docker info | grep -A 10 "Swarm:"
+
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-swarm-node
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Application
+          Value: fanfinity
+    CreationPolicy:
+      ResourceSignal:
+        Count: 1
+        Timeout: PT15M
+
+# =============================================================================
+# OUTPUTS
+# =============================================================================
+Outputs:
+  PublicIP:
+    Description: Elastic IP address of the Swarm node (use for DNS A records)
+    Value: !Ref ElasticIP
+    Export:
+      Name: !Sub ${AWS::StackName}-PublicIP
+
+  InstanceId:
+    Description: EC2 Instance ID
+    Value: !Ref SwarmInstance
+    Export:
+      Name: !Sub ${AWS::StackName}-InstanceId
+
+  SSHCommand:
+    Description: SSH command to connect to the instance
+    Value: !Sub ssh -i ${KeyPairName}.pem ec2-user@${ElasticIP}
+
+  SSMCommand:
+    Description: AWS SSM Session Manager command (no SSH key required)
+    Value: !Sub aws ssm start-session --target ${SwarmInstance} --region ${AWS::Region}
+
+  VPCId:
+    Description: VPC ID
+    Value: !Ref VPC
+    Export:
+      Name: !Sub ${AWS::StackName}-VPCId
+
+  SubnetId:
+    Description: Public Subnet ID
+    Value: !Ref PublicSubnet
+    Export:
+      Name: !Sub ${AWS::StackName}-SubnetId
+
+  SecurityGroupId:
+    Description: Security Group ID
+    Value: !Ref SwarmSecurityGroup
+    Export:
+      Name: !Sub ${AWS::StackName}-SecurityGroupId
+
+  DNSRecords:
+    Description: DNS A records to create (all pointing to the Elastic IP)
+    Value: !Sub |
+      Create these DNS A records pointing to ${ElasticIP}:
+      - api.${Domain} -> ${ElasticIP}
+      - grafana.${Domain} -> ${ElasticIP}
+      - prometheus.${Domain} -> ${ElasticIP}
+      - traefik.${Domain} -> ${ElasticIP}
+
+  ApplicationURLs:
+    Description: Application URLs (available after DNS configuration and deployment)
+    Value: !Sub |
+      API: https://api.${Domain}
+      Grafana: https://grafana.${Domain}
+      Prometheus: https://prometheus.${Domain}
+      Traefik: https://traefik.${Domain}
+
+  CredentialsLocation:
+    Description: Location of generated credentials on the instance
+    Value: /opt/fanfinity/credentials.txt
+
+  DeploymentInstructions:
+    Description: Next steps after stack creation
+    Value: !Sub |
+      1. Create DNS A records (see DNSRecords output)
+      2. SSH into the instance: ssh -i ${KeyPairName}.pem ec2-user@${ElasticIP}
+      3. Clone your repository: cd /opt/fanfinity && git clone <repo-url> app
+      4. Copy environment file: cp /opt/fanfinity/.env app/.env
+      5. Deploy services: cd app && ./scripts/deploy.sh
+      6. View credentials: cat /opt/fanfinity/credentials.txt
+
+  CloudWatchLogs:
+    Description: CloudWatch Log Groups for monitoring
+    Value: !Sub |
+      User Data Logs: https://${AWS::Region}.console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#logsV2:log-groups/log-group/$252F${AWS::StackName}$252Fuser-data
+      Docker Logs: https://${AWS::Region}.console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#logsV2:log-groups/log-group/$252F${AWS::StackName}$252Fdocker
+
+  # ---------------------------------------------------------------------------
+  # ECR & CI/CD OUTPUTS
+  # ---------------------------------------------------------------------------
+  ECRRegistry:
+    Description: ECR Registry URL (use for Docker push/pull)
+    Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
+    Export:
+      Name: !Sub ${AWS::StackName}-ECRRegistry
+
+  GoApiRepositoryUri:
+    Description: ECR Repository URI for go-api
+    Value: !GetAtt GoApiRepository.RepositoryUri
+    Export:
+      Name: !Sub ${AWS::StackName}-GoApiRepositoryUri
+
+  GoConsumerRepositoryUri:
+    Description: ECR Repository URI for go-consumer
+    Value: !GetAtt GoConsumerRepository.RepositoryUri
+    Export:
+      Name: !Sub ${AWS::StackName}-GoConsumerRepositoryUri
+
+  GitHubActionsRoleArn:
+    Description: IAM Role ARN for GitHub Actions (use in workflow)
+    Value: !GetAtt GitHubActionsRole.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-GitHubActionsRoleArn
+
+  GitHubSecretsConfig:
+    Description: GitHub repository secrets to configure
+    Value: !Sub |
+      Add these secrets to your GitHub repository (Settings > Secrets > Actions):
+
+      AWS_REGION: ${AWS::Region}
+      AWS_ACCOUNT_ID: ${AWS::AccountId}
+      AWS_ROLE_ARN: ${GitHubActionsRole.Arn}
+      ECR_REGISTRY: ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
+      STACK_NAME: ${AWS::StackName}
+      EC2_INSTANCE_ID: ${SwarmInstance}

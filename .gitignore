@@ -55,6 +55,20 @@ temp/
 # K6 test results
 tests/load/results/
 
+# Python load tests
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+.pytest_cache/
+*.egg-info/
+tests/load/*.db
+tests/load/*.csv
+
 # Local overrides (if any)
 docker-compose.override.yml
 *.local.yml

@@ -6,7 +6,19 @@
       "type": "shell",
       "command": "go run .",
       "options": {
-        "cwd": "${workspaceFolder}/apps/api"
+        "cwd": "${workspaceFolder}/apps/api",
+        "env": {
+          "SERVER_HOST": "0.0.0.0",
+          "SERVER_PORT": "8080",
+          "API_KEY": "love-football-here",
+          "KAFKA_BOOTSTRAP_SERVERS": "kafka:29092",
+          "KAFKA_TOPIC_EVENTS": "football_simulator.events",
+          "CLICKHOUSE_HOST": "clickhouse",
+          "CLICKHOUSE_PORT": "9000",
+          "CLICKHOUSE_DATABASE": "football_simulator",
+          "CLICKHOUSE_USER": "default",
+          "CLICKHOUSE_PASSWORD": ""
+        }
       },
       "isBackground": true,
       "problemMatcher": {
@@ -30,7 +42,19 @@
       "type": "shell",
       "command": "go run .",
       "options": {
-        "cwd": "${workspaceFolder}/apps/consumer"
+        "cwd": "${workspaceFolder}/apps/consumer",
+        "env": {
+          "KAFKA_BOOTSTRAP_SERVERS": "kafka:29092",
+          "KAFKA_TOPIC_EVENTS": "football_simulator.events",
+          "KAFKA_GROUP_ID": "clickhouse-writer",
+          "CLICKHOUSE_HOST": "clickhouse",
+          "CLICKHOUSE_PORT": "9000",
+          "CLICKHOUSE_DATABASE": "football_simulator",
+          "CLICKHOUSE_USER": "default",
+          "CLICKHOUSE_PASSWORD": "",
+          "CONSUMER_BATCH_SIZE": "100",
+          "CONSUMER_FLUSH_INTERVAL": "5s"
+        }
       },
       "isBackground": true,
       "problemMatcher": {
@@ -54,6 +78,41 @@
       "dependsOn": ["Start API Server", "Start Consumer"],
       "dependsOrder": "parallel",
       "problemMatcher": []
+    },
+    {
+      "label": "Load Test: Setup Python venv",
+      "type": "shell",
+      "command": "python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt",
+      "options": {
+        "cwd": "${workspaceFolder}/tests/load"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Load Test: Run Simulator (1K viewers, 5 min)",
+      "type": "shell",
+      "command": "source venv/bin/activate && python match_simulator.py --viewers 1000 --duration 5 --api-url http://localhost:8080 --api-key love-football-here",
+      "options": {
+        "cwd": "${workspaceFolder}/tests/load"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "Load Test: Run Simulator (100K viewers, 90 min)",
+      "type": "shell",
+      "command": "source venv/bin/activate && python match_simulator.py --viewers 100000 --duration 90 --api-url http://localhost:8080 --api-key love-football-here",
+      "options": {
+        "cwd": "${workspaceFolder}/tests/load"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
     }
   ]
 }

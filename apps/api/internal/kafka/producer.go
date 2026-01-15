@@ -307,3 +307,186 @@ func DefaultWriterConfig(brokers []string, topic string) WriterConfig {
 		Async:        false,
 	}
 }
+
+// EngagementProducer handles producing engagement events to Kafka.
+type EngagementProducer struct {
+	writer *kafka.Writer
+	logger *slog.Logger
+}
+
+// NewEngagementProducer creates a new EngagementProducer instance.
+func NewEngagementProducer(writer *kafka.Writer, logger *slog.Logger) *EngagementProducer {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &EngagementProducer{
+		writer: writer,
+		logger: logger,
+	}
+}
+
+// Produce sends an engagement event to Kafka.
+func (p *EngagementProducer) Produce(ctx context.Context, event *domain.EngagementEvent) error {
+	if event == nil {
+		return fmt.Errorf("engagement event cannot be nil")
+	}
+
+	startTime := time.Now()
+	topic := p.writer.Topic
+
+	value, err := event.ToKafkaMessage()
+	if err != nil {
+		p.logger.Error("failed to serialize engagement event",
+			slog.String("event_id", event.EventID.String()),
+			slog.String("match_id", event.MatchID),
+			slog.String("error", err.Error()),
+		)
+		kafkaMessagesProduced.WithLabelValues(topic, "serialization_error").Inc()
+		return fmt.Errorf("failed to serialize engagement: %w", err)
+	}
+
+	msg := kafka.Message{
+		Key:   []byte(event.MatchID + ":" + event.UserID),
+		Value: value,
+		Headers: []kafka.Header{
+			{Key: "engagement_type", Value: []byte(string(event.EngagementType))},
+			{Key: "event_id", Value: []byte(event.EventID.String())},
+			{Key: "user_id", Value: []byte(event.UserID)},
+		},
+		Time: event.Timestamp,
+	}
+
+	err = p.writer.WriteMessages(ctx, msg)
+	duration := time.Since(startTime)
+
+	kafkaProduceLatency.WithLabelValues(topic).Observe(duration.Seconds())
+	kafkaMessageSize.WithLabelValues(topic).Observe(float64(len(value)))
+
+	if err != nil {
+		p.logger.Error("failed to produce engagement to Kafka",
+			slog.String("event_id", event.EventID.String()),
+			slog.String("user_id", event.UserID),
+			slog.String("engagement_type", string(event.EngagementType)),
+			slog.Duration("duration", duration),
+			slog.String("error", err.Error()),
+		)
+		kafkaMessagesProduced.WithLabelValues(topic, "error").Inc()
+		return fmt.Errorf("failed to produce engagement: %w", err)
+	}
+
+	p.logger.Debug("produced engagement event",
+		slog.String("event_id", event.EventID.String()),
+		slog.String("engagement_type", string(event.EngagementType)),
+		slog.Duration("duration", duration),
+	)
+	kafkaMessagesProduced.WithLabelValues(topic, "success").Inc()
+
+	return nil
+}
+
+// ProduceBatch sends multiple engagement events to Kafka in a single batch.
+func (p *EngagementProducer) ProduceBatch(ctx context.Context, events []*domain.EngagementEvent) error {
+	if len(events) == 0 {
+		return nil
+	}
+
+	startTime := time.Now()
+	topic := p.writer.Topic
+
+	messages := make([]kafka.Message, 0, len(events))
+
+	for _, event := range events {
+		if event == nil {
+			continue
+		}
+
+		value, err := event.ToKafkaMessage()
+		if err != nil {
+			p.logger.Warn("skipping engagement due to serialization error",
+				slog.String("event_id", event.EventID.String()),
+				slog.String("error", err.Error()),
+			)
+			kafkaMessagesProduced.WithLabelValues(topic, "serialization_error").Inc()
+			continue
+		}
+
+		msg := kafka.Message{
+			Key:   []byte(event.MatchID + ":" + event.UserID),
+			Value: value,
+			Headers: []kafka.Header{
+				{Key: "engagement_type", Value: []byte(string(event.EngagementType))},
+				{Key: "event_id", Value: []byte(event.EventID.String())},
+				{Key: "user_id", Value: []byte(event.UserID)},
+			},
+			Time: event.Timestamp,
+		}
+
+		messages = append(messages, msg)
+		kafkaMessageSize.WithLabelValues(topic).Observe(float64(len(value)))
+	}
+
+	if len(messages) == 0 {
+		return nil
+	}
+
+	err := p.writer.WriteMessages(ctx, messages...)
+	duration := time.Since(startTime)
+
+	kafkaProduceLatency.WithLabelValues(topic).Observe(duration.Seconds())
+
+	if err != nil {
+		p.logger.Error("failed to produce engagement batch",
+			slog.Int("batch_size", len(messages)),
+			slog.Duration("duration", duration),
+			slog.String("error", err.Error()),
+		)
+		kafkaMessagesProduced.WithLabelValues(topic, "error").Add(float64(len(messages)))
+		return fmt.Errorf("failed to produce engagement batch: %w", err)
+	}
+
+	p.logger.Debug("produced engagement batch",
+		slog.Int("batch_size", len(messages)),
+		slog.Duration("duration", duration),
+	)
+	kafkaMessagesProduced.WithLabelValues(topic, "success").Add(float64(len(messages)))
+
+	return nil
+}
+
+// Close closes the engagement producer.
+func (p *EngagementProducer) Close() error {
+	if p.writer == nil {
+		return nil
+	}
+	return p.writer.Close()
+}
+
+// Ping checks Kafka connectivity.
+func (p *EngagementProducer) Ping(ctx context.Context) error {
+	conn, err := kafka.DialContext(ctx, "tcp", p.writer.Addr.String())
+	if err != nil {
+		return fmt.Errorf("engagement kafka ping failed: %w", err)
+	}
+	defer conn.Close()
+
+	_, err = conn.Brokers()
+	if err != nil {
+		return fmt.Errorf("engagement kafka broker check failed: %w", err)
+	}
+
+	return nil
+}
+
+// NewEngagementWriter creates a Kafka writer for engagement events.
+func NewEngagementWriter(brokers []string, topic string) *kafka.Writer {
+	return &kafka.Writer{
+		Addr:         kafka.TCP(brokers...),
+		Topic:        topic,
+		Balancer:     &kafka.Hash{},
+		BatchSize:    500,            // Higher batch size for engagement volume
+		BatchTimeout: 50 * time.Millisecond,
+		WriteTimeout: 10 * time.Second,
+		RequiredAcks: kafka.RequireOne, // Lower durability for high-volume engagement
+		Async:        false,
+	}
+}

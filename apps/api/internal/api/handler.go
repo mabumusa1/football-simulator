@@ -17,6 +17,13 @@ type EventProducer interface {
 	Ping(ctx context.Context) error
 }
 
+// EngagementProducer defines the interface for producing engagement events to Kafka.
+type EngagementProducer interface {
+	Produce(ctx context.Context, event *domain.EngagementEvent) error
+	ProduceBatch(ctx context.Context, events []*domain.EngagementEvent) error
+	Ping(ctx context.Context) error
+}
+
 // MetricsRepository defines the interface for querying metrics from ClickHouse (read-only).
 type MetricsRepository interface {
 	GetMatchMetrics(ctx context.Context, matchID string) (*domain.MatchMetrics, error)
@@ -26,8 +33,9 @@ type MetricsRepository interface {
 
 // Handler handles HTTP requests for the API.
 type Handler struct {
-	producer   EventProducer
-	repository MetricsRepository
+	producer           EventProducer
+	engagementProducer EngagementProducer
+	repository         MetricsRepository
 }
 
 // NewHandler creates a new Handler with the given producer and repository.
@@ -35,6 +43,15 @@ func NewHandler(producer EventProducer, repository MetricsRepository) *Handler {
 	return &Handler{
 		producer:   producer,
 		repository: repository,
+	}
+}
+
+// NewHandlerWithEngagement creates a new Handler with engagement producer support.
+func NewHandlerWithEngagement(producer EventProducer, engagementProducer EngagementProducer, repository MetricsRepository) *Handler {
+	return &Handler{
+		producer:           producer,
+		engagementProducer: engagementProducer,
+		repository:         repository,
 	}
 }
 
@@ -235,6 +252,74 @@ func ServeOpenAPISpec(spec []byte) http.HandlerFunc {
 		w.WriteHeader(http.StatusOK)
 		w.Write(spec)
 	}
+}
+
+// IngestEngagementsResponse represents the response for batch engagement ingestion.
+type IngestEngagementsResponse struct {
+	Accepted  int       `json:"accepted"`
+	Rejected  int       `json:"rejected"`
+	Status    string    `json:"status"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
+// IngestEngagements handles POST /api/engagements.
+// It accepts a batch of engagement events and produces them to Kafka.
+func (h *Handler) IngestEngagements(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+
+	// Check if engagement producer is configured
+	if h.engagementProducer == nil {
+		respondError(w, http.StatusServiceUnavailable, "engagement ingestion not configured", "")
+		return
+	}
+
+	// Parse JSON body
+	var req domain.EngagementBatchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid JSON body", err.Error())
+		return
+	}
+
+	if len(req.Events) == 0 {
+		respondError(w, http.StatusBadRequest, "no events provided", "")
+		return
+	}
+
+	// Validate and convert events
+	validEvents := make([]*domain.EngagementEvent, 0, len(req.Events))
+	rejected := 0
+
+	for _, eventReq := range req.Events {
+		event, err := eventReq.ToEngagementEvent()
+		if err != nil {
+			rejected++
+			continue
+		}
+		validEvents = append(validEvents, event)
+	}
+
+	// Produce to Kafka in batch
+	ctx := r.Context()
+	if err := h.engagementProducer.ProduceBatch(ctx, validEvents); err != nil {
+		RecordKafkaProduceError()
+		respondError(w, http.StatusServiceUnavailable, "failed to queue engagements", "")
+		return
+	}
+
+	// Record metrics
+	duration := time.Since(start)
+	for _, event := range validEvents {
+		RecordEngagementIngested(string(event.EngagementType))
+	}
+	RecordEngagementIngestDuration(duration)
+
+	response := IngestEngagementsResponse{
+		Accepted:  len(validEvents),
+		Rejected:  rejected,
+		Status:    "accepted",
+		Timestamp: time.Now().UTC(),
+	}
+	respondJSON(w, http.StatusAccepted, response)
 }
 
 const swaggerUIHTML = `<!DOCTYPE html>

@@ -53,6 +53,23 @@ var (
 		},
 	)
 
+	// Engagement ingestion metrics
+	engagementsIngestedTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "engagements_ingested_total",
+			Help: "Total number of engagement events ingested",
+		},
+		[]string{"engagement_type"},
+	)
+
+	engagementIngestDuration = promauto.NewHistogram(
+		prometheus.HistogramOpts{
+			Name:    "engagement_ingest_duration_seconds",
+			Help:    "Engagement batch ingestion duration in seconds",
+			Buckets: prometheus.DefBuckets,
+		},
+	)
+
 	// Error metrics
 	kafkaProduceErrorsTotal = promauto.NewCounter(
 		prometheus.CounterOpts{
@@ -158,6 +175,16 @@ func RecordEventIngested(eventType string) {
 // RecordEventIngestDuration records the duration of event ingestion.
 func RecordEventIngestDuration(duration time.Duration) {
 	eventIngestDuration.Observe(duration.Seconds())
+}
+
+// RecordEngagementIngested increments the engagement ingestion counter.
+func RecordEngagementIngested(engagementType string) {
+	engagementsIngestedTotal.WithLabelValues(engagementType).Inc()
+}
+
+// RecordEngagementIngestDuration records the duration of engagement batch ingestion.
+func RecordEngagementIngestDuration(duration time.Duration) {
+	engagementIngestDuration.Observe(duration.Seconds())
 }
 
 // RecordKafkaProduceError increments the Kafka produce error counter.
