@@ -401,10 +401,7 @@ func TestBatchConsumer_Stop(t *testing.T) {
 	consumer.wg.Add(1)
 	go func() {
 		defer consumer.wg.Done()
-		select {
-		case <-consumer.done:
-			return
-		}
+		<-consumer.done
 	}()
 
 	// Stop should close the done channel and wait

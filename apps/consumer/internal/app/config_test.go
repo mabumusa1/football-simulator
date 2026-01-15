@@ -26,7 +26,7 @@ func TestLoadConfig_DefaultValues(t *testing.T) {
 		"CONSUMER_GROUP",
 	}
 	for _, env := range envVars {
-		os.Unsetenv(env)
+		_ = os.Unsetenv(env)
 	}
 
 	cfg := LoadConfig()
@@ -85,18 +85,11 @@ func TestLoadConfig_DefaultValues(t *testing.T) {
 
 func TestLoadConfig_CustomKafkaValues(t *testing.T) {
 	// Set custom Kafka environment variables
-	os.Setenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
-	os.Setenv("KAFKA_TOPIC_PREFIX", "custom_prefix")
-	os.Setenv("KAFKA_TOPIC_EVENTS", "custom.events")
-	os.Setenv("KAFKA_TOPIC_RETRY", "custom.retry")
-	os.Setenv("KAFKA_TOPIC_DEAD", "custom.dead")
-	defer func() {
-		os.Unsetenv("KAFKA_BOOTSTRAP_SERVERS")
-		os.Unsetenv("KAFKA_TOPIC_PREFIX")
-		os.Unsetenv("KAFKA_TOPIC_EVENTS")
-		os.Unsetenv("KAFKA_TOPIC_RETRY")
-		os.Unsetenv("KAFKA_TOPIC_DEAD")
-	}()
+	t.Setenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+	t.Setenv("KAFKA_TOPIC_PREFIX", "custom_prefix")
+	t.Setenv("KAFKA_TOPIC_EVENTS", "custom.events")
+	t.Setenv("KAFKA_TOPIC_RETRY", "custom.retry")
+	t.Setenv("KAFKA_TOPIC_DEAD", "custom.dead")
 
 	cfg := LoadConfig()
 
@@ -119,18 +112,11 @@ func TestLoadConfig_CustomKafkaValues(t *testing.T) {
 
 func TestLoadConfig_CustomClickHouseValues(t *testing.T) {
 	// Set custom ClickHouse environment variables
-	os.Setenv("CLICKHOUSE_HOST", "localhost")
-	os.Setenv("CLICKHOUSE_PORT", "9001")
-	os.Setenv("CLICKHOUSE_DATABASE", "test_db")
-	os.Setenv("CLICKHOUSE_USER", "admin")
-	os.Setenv("CLICKHOUSE_PASSWORD", "secret123")
-	defer func() {
-		os.Unsetenv("CLICKHOUSE_HOST")
-		os.Unsetenv("CLICKHOUSE_PORT")
-		os.Unsetenv("CLICKHOUSE_DATABASE")
-		os.Unsetenv("CLICKHOUSE_USER")
-		os.Unsetenv("CLICKHOUSE_PASSWORD")
-	}()
+	t.Setenv("CLICKHOUSE_HOST", "localhost")
+	t.Setenv("CLICKHOUSE_PORT", "9001")
+	t.Setenv("CLICKHOUSE_DATABASE", "test_db")
+	t.Setenv("CLICKHOUSE_USER", "admin")
+	t.Setenv("CLICKHOUSE_PASSWORD", "secret123")
 
 	cfg := LoadConfig()
 
@@ -153,18 +139,11 @@ func TestLoadConfig_CustomClickHouseValues(t *testing.T) {
 
 func TestLoadConfig_CustomConsumerValues(t *testing.T) {
 	// Set custom Consumer environment variables
-	os.Setenv("CONSUMER_BATCH_SIZE", "500")
-	os.Setenv("CONSUMER_FLUSH_INTERVAL", "10s")
-	os.Setenv("CONSUMER_MAX_RETRIES", "5")
-	os.Setenv("CONSUMER_RETRY_BACKOFF", "2s")
-	os.Setenv("CONSUMER_GROUP", "custom-group")
-	defer func() {
-		os.Unsetenv("CONSUMER_BATCH_SIZE")
-		os.Unsetenv("CONSUMER_FLUSH_INTERVAL")
-		os.Unsetenv("CONSUMER_MAX_RETRIES")
-		os.Unsetenv("CONSUMER_RETRY_BACKOFF")
-		os.Unsetenv("CONSUMER_GROUP")
-	}()
+	t.Setenv("CONSUMER_BATCH_SIZE", "500")
+	t.Setenv("CONSUMER_FLUSH_INTERVAL", "10s")
+	t.Setenv("CONSUMER_MAX_RETRIES", "5")
+	t.Setenv("CONSUMER_RETRY_BACKOFF", "2s")
+	t.Setenv("CONSUMER_GROUP", "custom-group")
 
 	cfg := LoadConfig()
 
@@ -186,8 +165,7 @@ func TestLoadConfig_CustomConsumerValues(t *testing.T) {
 }
 
 func TestGetEnv_ExistingVariable(t *testing.T) {
-	os.Setenv("TEST_VAR", "test_value")
-	defer os.Unsetenv("TEST_VAR")
+	t.Setenv("TEST_VAR", "test_value")
 
 	result := getEnv("TEST_VAR", "default")
 	if result != "test_value" {
@@ -196,7 +174,7 @@ func TestGetEnv_ExistingVariable(t *testing.T) {
 }
 
 func TestGetEnv_NonExistingVariable(t *testing.T) {
-	os.Unsetenv("NON_EXISTING_VAR")
+	_ = os.Unsetenv("NON_EXISTING_VAR")
 
 	result := getEnv("NON_EXISTING_VAR", "default_value")
 	if result != "default_value" {
@@ -205,8 +183,7 @@ func TestGetEnv_NonExistingVariable(t *testing.T) {
 }
 
 func TestGetEnv_EmptyValue(t *testing.T) {
-	os.Setenv("EMPTY_VAR", "")
-	defer os.Unsetenv("EMPTY_VAR")
+	t.Setenv("EMPTY_VAR", "")
 
 	result := getEnv("EMPTY_VAR", "default")
 	if result != "" {
@@ -215,8 +192,7 @@ func TestGetEnv_EmptyValue(t *testing.T) {
 }
 
 func TestGetEnvInt_ValidInteger(t *testing.T) {
-	os.Setenv("INT_VAR", "42")
-	defer os.Unsetenv("INT_VAR")
+	t.Setenv("INT_VAR", "42")
 
 	result := getEnvInt("INT_VAR", 10)
 	if result != 42 {
@@ -225,8 +201,7 @@ func TestGetEnvInt_ValidInteger(t *testing.T) {
 }
 
 func TestGetEnvInt_InvalidInteger(t *testing.T) {
-	os.Setenv("INT_VAR", "not_a_number")
-	defer os.Unsetenv("INT_VAR")
+	t.Setenv("INT_VAR", "not_a_number")
 
 	result := getEnvInt("INT_VAR", 10)
 	if result != 10 {
@@ -235,7 +210,7 @@ func TestGetEnvInt_InvalidInteger(t *testing.T) {
 }
 
 func TestGetEnvInt_NonExistingVariable(t *testing.T) {
-	os.Unsetenv("NON_EXISTING_INT")
+	_ = os.Unsetenv("NON_EXISTING_INT")
 
 	result := getEnvInt("NON_EXISTING_INT", 99)
 	if result != 99 {
@@ -244,8 +219,7 @@ func TestGetEnvInt_NonExistingVariable(t *testing.T) {
 }
 
 func TestGetEnvInt_NegativeInteger(t *testing.T) {
-	os.Setenv("INT_VAR", "-5")
-	defer os.Unsetenv("INT_VAR")
+	t.Setenv("INT_VAR", "-5")
 
 	result := getEnvInt("INT_VAR", 10)
 	if result != -5 {
@@ -254,8 +228,7 @@ func TestGetEnvInt_NegativeInteger(t *testing.T) {
 }
 
 func TestGetEnvInt_Zero(t *testing.T) {
-	os.Setenv("INT_VAR", "0")
-	defer os.Unsetenv("INT_VAR")
+	t.Setenv("INT_VAR", "0")
 
 	result := getEnvInt("INT_VAR", 10)
 	if result != 0 {
@@ -277,8 +250,7 @@ func TestGetEnvDuration_ValidDuration(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.input, func(t *testing.T) {
-			os.Setenv("DURATION_VAR", tc.input)
-			defer os.Unsetenv("DURATION_VAR")
+			t.Setenv("DURATION_VAR", tc.input)
 
 			result := getEnvDuration("DURATION_VAR", time.Second)
 			if result != tc.expected {
@@ -289,8 +261,7 @@ func TestGetEnvDuration_ValidDuration(t *testing.T) {
 }
 
 func TestGetEnvDuration_InvalidDuration(t *testing.T) {
-	os.Setenv("DURATION_VAR", "not_a_duration")
-	defer os.Unsetenv("DURATION_VAR")
+	t.Setenv("DURATION_VAR", "not_a_duration")
 
 	result := getEnvDuration("DURATION_VAR", 5*time.Second)
 	if result != 5*time.Second {
@@ -299,7 +270,7 @@ func TestGetEnvDuration_InvalidDuration(t *testing.T) {
 }
 
 func TestGetEnvDuration_NonExistingVariable(t *testing.T) {
-	os.Unsetenv("NON_EXISTING_DURATION")
+	_ = os.Unsetenv("NON_EXISTING_DURATION")
 
 	result := getEnvDuration("NON_EXISTING_DURATION", 30*time.Second)
 	if result != 30*time.Second {
@@ -308,8 +279,7 @@ func TestGetEnvDuration_NonExistingVariable(t *testing.T) {
 }
 
 func TestGetEnvDuration_EmptyValue(t *testing.T) {
-	os.Setenv("DURATION_VAR", "")
-	defer os.Unsetenv("DURATION_VAR")
+	t.Setenv("DURATION_VAR", "")
 
 	result := getEnvDuration("DURATION_VAR", 5*time.Second)
 	if result != 5*time.Second {
@@ -319,12 +289,8 @@ func TestGetEnvDuration_EmptyValue(t *testing.T) {
 
 func TestLoadConfig_PartialOverride(t *testing.T) {
 	// Only set some values, others should use defaults
-	os.Setenv("KAFKA_BOOTSTRAP_SERVERS", "custom-kafka:9092")
-	os.Setenv("CONSUMER_BATCH_SIZE", "2000")
-	defer func() {
-		os.Unsetenv("KAFKA_BOOTSTRAP_SERVERS")
-		os.Unsetenv("CONSUMER_BATCH_SIZE")
-	}()
+	t.Setenv("KAFKA_BOOTSTRAP_SERVERS", "custom-kafka:9092")
+	t.Setenv("CONSUMER_BATCH_SIZE", "2000")
 
 	cfg := LoadConfig()
 
