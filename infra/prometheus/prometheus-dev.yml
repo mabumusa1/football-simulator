@@ -10,7 +10,7 @@ global:
 
   external_labels:
     environment: development
-    cluster: fanfinity-dev
+    cluster: football-simulator-dev
 
 scrape_configs:
   # Prometheus Self-Monitoring

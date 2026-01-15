@@ -7,7 +7,7 @@
 
 services:
   go-api:
-    image: ${REGISTRY:-localhost:5000}/fanfinity-api:${VERSION:-latest}
+    image: ${REGISTRY:-localhost:5000}/football-simulator-api:${VERSION:-latest}
 
     networks:
       - traefik-public

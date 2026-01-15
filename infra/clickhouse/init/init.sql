@@ -1,11 +1,11 @@
 -- =============================================================================
--- Fanfinity ClickHouse Schema Initialization
+-- Football Simulator ClickHouse Schema Initialization
 -- =============================================================================
 -- This script runs automatically on first container start
 -- =============================================================================
 
 -- Create the main database
-CREATE DATABASE IF NOT EXISTS fanfinity;
+CREATE DATABASE IF NOT EXISTS football_simulator;
 
 -- =============================================================================
 -- API Events Table
@@ -13,7 +13,7 @@ CREATE DATABASE IF NOT EXISTS fanfinity;
 -- Stores all API request metrics from the Go application
 -- Partitioned by month for efficient data retention management
 -- =============================================================================
-CREATE TABLE IF NOT EXISTS fanfinity.api_events (
+CREATE TABLE IF NOT EXISTS football_simulator.api_events (
     -- Unique event identifier
     event_id UUID DEFAULT generateUUIDv4(),
 
@@ -52,7 +52,7 @@ SETTINGS index_granularity = 8192;
 -- =============================================================================
 -- Pre-aggregates data for faster dashboard queries
 -- =============================================================================
-CREATE TABLE IF NOT EXISTS fanfinity.api_events_hourly (
+CREATE TABLE IF NOT EXISTS football_simulator.api_events_hourly (
     hour DateTime,
     endpoint String,
     method LowCardinality(String),
@@ -76,8 +76,8 @@ ENGINE = SummingMergeTree()
 PARTITION BY toYYYYMM(hour)
 ORDER BY (hour, endpoint, method);
 
-CREATE MATERIALIZED VIEW IF NOT EXISTS fanfinity.api_events_hourly_mv
-TO fanfinity.api_events_hourly AS
+CREATE MATERIALIZED VIEW IF NOT EXISTS football_simulator.api_events_hourly_mv
+TO football_simulator.api_events_hourly AS
 SELECT
     toStartOfHour(timestamp) AS hour,
     endpoint,
@@ -91,7 +91,7 @@ SELECT
     max(response_time_ms) AS max_response_time,
     sum(request_size_bytes) AS total_request_bytes,
     sum(response_size_bytes) AS total_response_bytes
-FROM fanfinity.api_events
+FROM football_simulator.api_events
 GROUP BY hour, endpoint, method;
 
 -- =============================================================================
@@ -102,7 +102,7 @@ GROUP BY hour, endpoint, method;
 -- SELECT
 --     endpoint,
 --     count() / 3600 AS requests_per_second
--- FROM fanfinity.api_events
+-- FROM football_simulator.api_events
 -- WHERE timestamp > now() - INTERVAL 1 HOUR
 -- GROUP BY endpoint
 -- ORDER BY requests_per_second DESC;
@@ -111,7 +111,7 @@ GROUP BY hour, endpoint, method;
 -- SELECT
 --     endpoint,
 --     countIf(status_code >= 400) / count() * 100 AS error_rate_percent
--- FROM fanfinity.api_events
+-- FROM football_simulator.api_events
 -- WHERE timestamp > now() - INTERVAL 1 HOUR
 -- GROUP BY endpoint
 -- ORDER BY error_rate_percent DESC;
@@ -122,7 +122,7 @@ GROUP BY hour, endpoint, method;
 --     quantile(0.50)(response_time_ms) AS p50,
 --     quantile(0.95)(response_time_ms) AS p95,
 --     quantile(0.99)(response_time_ms) AS p99
--- FROM fanfinity.api_events
+-- FROM football_simulator.api_events
 -- WHERE timestamp > now() - INTERVAL 1 HOUR
 -- GROUP BY endpoint;
 -- =============================================================================

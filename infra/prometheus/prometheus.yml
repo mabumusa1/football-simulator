@@ -11,7 +11,7 @@ global:
   # Attach these labels to any time series or alerts
   external_labels:
     environment: production
-    cluster: fanfinity-swarm
+    cluster: football-simulator-swarm
 
 # =============================================================================
 # Scrape Configurations

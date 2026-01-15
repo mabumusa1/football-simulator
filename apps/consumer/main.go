@@ -14,9 +14,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	kafkalib "github.com/segmentio/kafka-go"
 
-	"github.com/fanfinity/consumer/internal/app"
-	"github.com/fanfinity/consumer/internal/kafka"
-	"github.com/fanfinity/consumer/internal/repository"
+	"github.com/mabumusa1/football-simulator/apps/consumer/internal/app"
+	"github.com/mabumusa1/football-simulator/apps/consumer/internal/kafka"
+	"github.com/mabumusa1/football-simulator/apps/consumer/internal/repository"
 )
 
 // Version is set at build time via ldflags.
@@ -29,7 +29,7 @@ func main() {
 	}))
 	slog.SetDefault(logger)
 
-	logger.Info("starting Fanfinity event consumer",
+	logger.Info("starting Football Simulator event consumer",
 		slog.String("version", Version),
 		slog.String("component", "consumer"),
 	)
@@ -184,7 +184,7 @@ func main() {
 		consumer.Start(ctx)
 	}()
 
-	logger.Info("Fanfinity event consumer is running",
+	logger.Info("Football Simulator event consumer is running",
 		slog.String("events_topic", cfg.Kafka.TopicEvents),
 		slog.String("retry_topic", cfg.Kafka.TopicRetry),
 		slog.String("dead_topic", cfg.Kafka.TopicDead),
@@ -249,5 +249,5 @@ func main() {
 	}
 	logger.Info("ClickHouse connection closed")
 
-	logger.Info("Fanfinity event consumer shutdown complete")
+	logger.Info("Football Simulator event consumer shutdown complete")
 }

@@ -8,7 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/fanfinity/go-api/internal/domain"
+	"github.com/mabumusa1/football-simulator/apps/api/internal/domain"
 )
 
 // EventProducer defines the interface for producing events to Kafka.

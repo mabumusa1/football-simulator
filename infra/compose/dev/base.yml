@@ -6,7 +6,7 @@
 # =============================================================================
 
 networks:
-  fanfinity-net:
+  football-simulator-net:
     driver: bridge
 
 volumes:

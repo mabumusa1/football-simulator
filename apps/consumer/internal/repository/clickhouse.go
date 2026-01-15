@@ -12,14 +12,14 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 
-	"github.com/fanfinity/consumer/internal/domain"
+	"github.com/mabumusa1/football-simulator/apps/consumer/internal/domain"
 )
 
 var (
 	// Prometheus metrics for ClickHouse repository
 	clickhouseQueryDuration = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Namespace: "fanfinity",
+			Namespace: "football_simulator",
 			Subsystem: "clickhouse",
 			Name:      "query_duration_seconds",
 			Help:      "Histogram of ClickHouse query latency in seconds",
@@ -30,7 +30,7 @@ var (
 
 	clickhouseQueryErrors = promauto.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: "fanfinity",
+			Namespace: "football_simulator",
 			Subsystem: "clickhouse",
 			Name:      "query_errors_total",
 			Help:      "Total number of ClickHouse query errors",
@@ -40,7 +40,7 @@ var (
 
 	clickhouseBatchSize = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Namespace: "fanfinity",
+			Namespace: "football_simulator",
 			Subsystem: "clickhouse",
 			Name:      "batch_size",
 			Help:      "Histogram of batch insert sizes",
@@ -51,7 +51,7 @@ var (
 
 	clickhouseEventsInserted = promauto.NewCounter(
 		prometheus.CounterOpts{
-			Namespace: "fanfinity",
+			Namespace: "football_simulator",
 			Subsystem: "clickhouse",
 			Name:      "events_inserted_total",
 			Help:      "Total number of events inserted into ClickHouse",
@@ -99,7 +99,7 @@ func (r *ClickHouseRepository) Ping(ctx context.Context) error {
 	return nil
 }
 
-// InsertBatch inserts a batch of events into the fanfinity.match_events table.
+// InsertBatch inserts a batch of events into the football_simulator.match_events table.
 // Uses ClickHouse batch insert for optimal performance.
 func (r *ClickHouseRepository) InsertBatch(ctx context.Context, events []*domain.Event) error {
 	if len(events) == 0 {
@@ -110,7 +110,7 @@ func (r *ClickHouseRepository) InsertBatch(ctx context.Context, events []*domain
 
 	// Prepare batch insert
 	batch, err := r.conn.PrepareBatch(ctx, `
-		INSERT INTO fanfinity.match_events (
+		INSERT INTO football_simulator.match_events (
 			event_id,
 			match_id,
 			event_type,
@@ -218,7 +218,7 @@ type ConnectionConfig struct {
 func DefaultConnectionConfig() ConnectionConfig {
 	return ConnectionConfig{
 		Hosts:           []string{"localhost:9000"},
-		Database:        "fanfinity",
+		Database:        "football_simulator",
 		Username:        "default",
 		Password:        "",
 		MaxOpenConns:    10,

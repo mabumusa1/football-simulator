@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# Fanfinity Stack Deployment Script
+# Football Simulator Stack Deployment Script
 # =============================================================================
 # Merges service files and deploys to Docker Swarm
 #
@@ -26,7 +26,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 SERVICES_DIR="$PROJECT_DIR/infra/compose/prod"
 TESTS_DIR="$PROJECT_DIR/tests/load"
-STACK_NAME="${STACK_NAME:-fanfinity}"
+STACK_NAME="${STACK_NAME:-football-simulator}"
 
 # Available services (order matters for dependencies)
 SERVICES=(

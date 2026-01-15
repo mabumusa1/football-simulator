@@ -10,14 +10,14 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/segmentio/kafka-go"
 
-	"github.com/fanfinity/go-api/internal/domain"
+	"github.com/mabumusa1/football-simulator/apps/api/internal/domain"
 )
 
 var (
 	// Prometheus metrics for Kafka producer
 	kafkaMessagesProduced = promauto.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: "fanfinity",
+			Namespace: "football_simulator",
 			Subsystem: "kafka_producer",
 			Name:      "messages_produced_total",
 			Help:      "Total number of messages produced to Kafka",
@@ -27,7 +27,7 @@ var (
 
 	kafkaProduceLatency = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Namespace: "fanfinity",
+			Namespace: "football_simulator",
 			Subsystem: "kafka_producer",
 			Name:      "produce_duration_seconds",
 			Help:      "Histogram of Kafka produce latency in seconds",
@@ -38,7 +38,7 @@ var (
 
 	kafkaMessageSize = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Namespace: "fanfinity",
+			Namespace: "football_simulator",
 			Subsystem: "kafka_producer",
 			Name:      "message_size_bytes",
 			Help:      "Histogram of Kafka message sizes in bytes",

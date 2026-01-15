@@ -45,15 +45,15 @@ func LoadConfig() *Config {
 	return &Config{
 		Kafka: KafkaConfig{
 			BootstrapServers: getEnv("KAFKA_BOOTSTRAP_SERVERS", "kafka:29092"),
-			TopicPrefix:      getEnv("KAFKA_TOPIC_PREFIX", "fanfinity"),
-			TopicEvents:      getEnv("KAFKA_TOPIC_EVENTS", "fanfinity.events"),
-			TopicRetry:       getEnv("KAFKA_TOPIC_RETRY", "fanfinity.retry"),
-			TopicDead:        getEnv("KAFKA_TOPIC_DEAD", "fanfinity.dead"),
+			TopicPrefix:      getEnv("KAFKA_TOPIC_PREFIX", "football_simulator"),
+			TopicEvents:      getEnv("KAFKA_TOPIC_EVENTS", "football_simulator.events"),
+			TopicRetry:       getEnv("KAFKA_TOPIC_RETRY", "football_simulator.retry"),
+			TopicDead:        getEnv("KAFKA_TOPIC_DEAD", "football_simulator.dead"),
 		},
 		ClickHouse: ClickHouseConfig{
 			Host:     getEnv("CLICKHOUSE_HOST", "clickhouse"),
 			Port:     getEnvInt("CLICKHOUSE_PORT", 9000),
-			Database: getEnv("CLICKHOUSE_DATABASE", "fanfinity"),
+			Database: getEnv("CLICKHOUSE_DATABASE", "football_simulator"),
 			User:     getEnv("CLICKHOUSE_USER", "default"),
 			Password: getEnv("CLICKHOUSE_PASSWORD", ""),
 		},
@@ -62,7 +62,7 @@ func LoadConfig() *Config {
 			FlushInterval: getEnvDuration("CONSUMER_FLUSH_INTERVAL", 5*time.Second),
 			MaxRetries:    getEnvInt("CONSUMER_MAX_RETRIES", 3),
 			RetryBackoff:  getEnvDuration("CONSUMER_RETRY_BACKOFF", 1*time.Second),
-			ConsumerGroup: getEnv("CONSUMER_GROUP", "fanfinity-consumers"),
+			ConsumerGroup: getEnv("CONSUMER_GROUP", "football_simulator-consumers"),
 		},
 	}
 }

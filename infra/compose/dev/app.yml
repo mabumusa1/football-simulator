@@ -15,7 +15,7 @@ services:
       - go-modules:/go/pkg/mod
 
     networks:
-      - fanfinity-net
+      - football-simulator-net
 
     depends_on:
       clickhouse:

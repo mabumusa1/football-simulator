@@ -17,7 +17,7 @@ services:
       - internal
 
     environment:
-      CLICKHOUSE_DB: fanfinity
+      CLICKHOUSE_DB: football_simulator
       CLICKHOUSE_USER: default
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
 

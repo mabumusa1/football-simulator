@@ -1,5 +1,5 @@
 # =============================================================================
-# Fanfinity Consumer - Multi-stage Dockerfile
+# Football Simulator Consumer - Multi-stage Dockerfile
 # =============================================================================
 # Kafka consumer that batch-writes events to ClickHouse
 # =============================================================================

@@ -37,7 +37,7 @@ services:
       - kafka-data:/var/lib/kafka/data
 
     networks:
-      - fanfinity-net
+      - football-simulator-net
 
     healthcheck:
       test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:29092 --list || exit 1"]
@@ -56,12 +56,12 @@ services:
       - "8081:8080"
 
     environment:
-      KAFKA_CLUSTERS_0_NAME: fanfinity-local
+      KAFKA_CLUSTERS_0_NAME: football-simulator-local
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
       DYNAMIC_CONFIG_ENABLED: "true"
 
     networks:
-      - fanfinity-net
+      - football-simulator-net
 
     depends_on:
       kafka:

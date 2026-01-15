@@ -7,10 +7,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/fanfinity/go-api/internal/api"
-	"github.com/fanfinity/go-api/internal/app"
-	"github.com/fanfinity/go-api/internal/kafka"
-	"github.com/fanfinity/go-api/internal/repository"
+	"github.com/mabumusa1/football-simulator/apps/api/internal/api"
+	"github.com/mabumusa1/football-simulator/apps/api/internal/app"
+	"github.com/mabumusa1/football-simulator/apps/api/internal/kafka"
+	"github.com/mabumusa1/football-simulator/apps/api/internal/repository"
 )
 
 // Version is set at build time via ldflags.
@@ -23,7 +23,7 @@ func main() {
 	}))
 	slog.SetDefault(logger)
 
-	logger.Info("starting Fanfinity API server",
+	logger.Info("starting Football Simulator API server",
 		slog.String("version", Version),
 		slog.String("component", "server"),
 	)
@@ -87,7 +87,7 @@ func main() {
 		}
 	}()
 
-	logger.Info("Fanfinity API server is running",
+	logger.Info("Football Simulator API server is running",
 		slog.String("address", addr),
 		slog.String("health_endpoint", "/health"),
 		slog.String("ready_endpoint", "/ready"),
@@ -97,5 +97,5 @@ func main() {
 	// Wait for shutdown signal (SIGINT, SIGTERM)
 	app.WaitForShutdown(appCtx, 30*time.Second)
 
-	logger.Info("Fanfinity API server shutdown complete")
+	logger.Info("Football Simulator API server shutdown complete")
 }

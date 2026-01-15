@@ -12,14 +12,14 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/segmentio/kafka-go"
 
-	"github.com/fanfinity/consumer/internal/domain"
+	"github.com/mabumusa1/football-simulator/apps/consumer/internal/domain"
 )
 
 var (
 	// Prometheus metrics for Kafka consumer
 	kafkaConsumerLag = promauto.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Namespace: "fanfinity",
+			Namespace: "football_simulator",
 			Subsystem: "kafka_consumer",
 			Name:      "lag",
 			Help:      "Current consumer lag (difference between latest offset and committed offset)",
@@ -29,7 +29,7 @@ var (
 
 	kafkaBatchesProcessed = promauto.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: "fanfinity",
+			Namespace: "football_simulator",
 			Subsystem: "kafka_consumer",
 			Name:      "batches_processed_total",
 			Help:      "Total number of batches processed",
@@ -39,7 +39,7 @@ var (
 
 	kafkaEventsConsumed = promauto.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: "fanfinity",
+			Namespace: "football_simulator",
 			Subsystem: "kafka_consumer",
 			Name:      "events_consumed_total",
 			Help:      "Total number of events consumed from Kafka",
@@ -49,7 +49,7 @@ var (
 
 	kafkaConsumeDuration = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Namespace: "fanfinity",
+			Namespace: "football_simulator",
 			Subsystem: "kafka_consumer",
 			Name:      "consume_duration_seconds",
 			Help:      "Histogram of batch processing duration in seconds",
@@ -60,7 +60,7 @@ var (
 
 	kafkaRetryEvents = promauto.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: "fanfinity",
+			Namespace: "football_simulator",
 			Subsystem: "kafka_consumer",
 			Name:      "retry_events_total",
 			Help:      "Total number of events sent to retry topic",
@@ -70,7 +70,7 @@ var (
 
 	kafkaDeadLetterEvents = promauto.NewCounter(
 		prometheus.CounterOpts{
-			Namespace: "fanfinity",
+			Namespace: "football_simulator",
 			Subsystem: "kafka_consumer",
 			Name:      "dead_letter_events_total",
 			Help:      "Total number of events sent to dead letter queue",

@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/fanfinity/go-api/internal/domain"
+	"github.com/mabumusa1/football-simulator/apps/api/internal/domain"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )

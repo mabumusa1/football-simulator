@@ -12,14 +12,14 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 
-	"github.com/fanfinity/go-api/internal/domain"
+	"github.com/mabumusa1/football-simulator/apps/api/internal/domain"
 )
 
 var (
 	// Prometheus metrics for ClickHouse repository
 	clickhouseQueryDuration = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Namespace: "fanfinity",
+			Namespace: "football_simulator",
 			Subsystem: "clickhouse",
 			Name:      "query_duration_seconds",
 			Help:      "Histogram of ClickHouse query latency in seconds",
@@ -30,7 +30,7 @@ var (
 
 	clickhouseQueryErrors = promauto.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: "fanfinity",
+			Namespace: "football_simulator",
 			Subsystem: "clickhouse",
 			Name:      "query_errors_total",
 			Help:      "Total number of ClickHouse query errors",
@@ -40,7 +40,7 @@ var (
 
 	clickhouseBatchSize = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Namespace: "fanfinity",
+			Namespace: "football_simulator",
 			Subsystem: "clickhouse",
 			Name:      "batch_size",
 			Help:      "Histogram of batch insert sizes",
@@ -51,7 +51,7 @@ var (
 
 	clickhouseEventsInserted = promauto.NewCounter(
 		prometheus.CounterOpts{
-			Namespace: "fanfinity",
+			Namespace: "football_simulator",
 			Subsystem: "clickhouse",
 			Name:      "events_inserted_total",
 			Help:      "Total number of events inserted into ClickHouse",
@@ -99,7 +99,7 @@ func (r *ClickHouseRepository) Ping(ctx context.Context) error {
 	return nil
 }
 
-// InsertBatch inserts a batch of events into the fanfinity.match_events table.
+// InsertBatch inserts a batch of events into the football_simulator.match_events table.
 // Uses ClickHouse batch insert for optimal performance.
 func (r *ClickHouseRepository) InsertBatch(ctx context.Context, events []*domain.Event) error {
 	if len(events) == 0 {
@@ -110,7 +110,7 @@ func (r *ClickHouseRepository) InsertBatch(ctx context.Context, events []*domain
 
 	// Prepare batch insert
 	batch, err := r.conn.PrepareBatch(ctx, `
-		INSERT INTO fanfinity.match_events (
+		INSERT INTO football_simulator.match_events (
 			event_id,
 			match_id,
 			event_type,
@@ -193,7 +193,7 @@ func (r *ClickHouseRepository) InsertBatch(ctx context.Context, events []*domain
 }
 
 // GetMatchMetrics retrieves aggregated metrics for a specific match.
-// Queries the fanfinity.match_metrics materialized view and aggregates events by type.
+// Queries the football_simulator.match_metrics materialized view and aggregates events by type.
 func (r *ClickHouseRepository) GetMatchMetrics(ctx context.Context, matchID string) (*domain.MatchMetrics, error) {
 	if matchID == "" {
 		return nil, fmt.Errorf("matchID cannot be empty")
@@ -213,7 +213,7 @@ func (r *ClickHouseRepository) GetMatchMetrics(ctx context.Context, matchID stri
 			countIf(event_type = 'red_card') as red_cards,
 			min(timestamp) as first_event_at,
 			max(timestamp) as last_event_at
-		FROM fanfinity.match_events
+		FROM football_simulator.match_events
 		WHERE match_id = ?
 	`, matchID)
 
@@ -256,7 +256,7 @@ func (r *ClickHouseRepository) GetMatchMetrics(ctx context.Context, matchID stri
 	// Query events by type
 	rows, err := r.conn.Query(ctx, `
 		SELECT event_type, count(*) as event_count
-		FROM fanfinity.match_events
+		FROM football_simulator.match_events
 		WHERE match_id = ?
 		GROUP BY event_type
 		ORDER BY event_count DESC
@@ -302,7 +302,7 @@ func (r *ClickHouseRepository) GetMatchMetrics(ctx context.Context, matchID stri
 		SELECT
 			toStartOfMinute(timestamp) as minute,
 			count(*) as event_count
-		FROM fanfinity.match_events
+		FROM football_simulator.match_events
 		WHERE match_id = ?
 		GROUP BY minute
 		ORDER BY event_count DESC
@@ -332,7 +332,7 @@ func (r *ClickHouseRepository) GetMatchMetrics(ctx context.Context, matchID stri
 }
 
 // GetEventsPerMinute retrieves events aggregated by minute for a specific match.
-// Uses the fanfinity.events_per_minute materialized view if available.
+// Uses the football_simulator.events_per_minute materialized view if available.
 func (r *ClickHouseRepository) GetEventsPerMinute(ctx context.Context, matchID string) ([]domain.EventsPerMinute, error) {
 	if matchID == "" {
 		return nil, fmt.Errorf("matchID cannot be empty")
@@ -345,7 +345,7 @@ func (r *ClickHouseRepository) GetEventsPerMinute(ctx context.Context, matchID s
 			toStartOfMinute(timestamp) as minute,
 			event_type,
 			count(*) as event_count
-		FROM fanfinity.match_events
+		FROM football_simulator.match_events
 		WHERE match_id = ?
 		GROUP BY minute, event_type
 		ORDER BY minute ASC, event_type ASC
@@ -430,7 +430,7 @@ type ConnectionConfig struct {
 func DefaultConnectionConfig() ConnectionConfig {
 	return ConnectionConfig{
 		Hosts:           []string{"localhost:9000"},
-		Database:        "fanfinity",
+		Database:        "football_simulator",
 		Username:        "default",
 		Password:        "",
 		MaxOpenConns:    10,

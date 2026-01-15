@@ -15,7 +15,7 @@
         },
         "background": {
           "activeOnStart": true,
-          "beginsPattern": "^.*starting Fanfinity API server.*$",
+          "beginsPattern": "^.*starting Football Simulator API server.*$",
           "endsPattern": "^.*HTTP server starting.*$"
         }
       },

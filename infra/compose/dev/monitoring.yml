@@ -24,7 +24,7 @@ services:
       - prometheus-data:/prometheus
 
     networks:
-      - fanfinity-net
+      - football-simulator-net
 
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
@@ -54,7 +54,7 @@ services:
       - ../../grafana/dashboards:/var/lib/grafana/dashboards:ro
 
     networks:
-      - fanfinity-net
+      - football-simulator-net
 
     depends_on:
       - prometheus

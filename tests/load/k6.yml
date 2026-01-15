@@ -6,9 +6,9 @@ services:
   # Scale to 1 to run tests, scale to 0 when complete
   #
   # Usage:
-  #   docker service scale fanfinity_k6=1  # Start test
-  #   docker service logs -f fanfinity_k6  # Watch progress
-  #   docker service scale fanfinity_k6=0  # Stop/complete
+  #   docker service scale football-simulator_k6=1  # Start test
+  #   docker service logs -f football-simulator_k6  # Watch progress
+  #   docker service scale football-simulator_k6=0  # Stop/complete
   # ---------------------------------------------------------------------------
   k6:
     image: grafana/k6:1.5.0
@@ -47,5 +47,5 @@ services:
         reservations:
           memory: 256M
       labels:
-        - "com.fanfinity.service=k6"
-        - "com.fanfinity.type=testing"
+        - "com.football-simulator.service=k6"
+        - "com.football-simulator.type=testing"

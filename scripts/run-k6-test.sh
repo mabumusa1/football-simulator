@@ -12,7 +12,7 @@
 
 set -e
 
-STACK_NAME="${STACK_NAME:-fanfinity}"
+STACK_NAME="${STACK_NAME:-football-simulator}"
 SERVICE_NAME="${STACK_NAME}_k6"
 
 # Colors
