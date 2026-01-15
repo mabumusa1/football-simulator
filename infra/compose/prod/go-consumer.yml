@@ -1,0 +1,31 @@
+# =============================================================================
+# GO-CONSUMER - Kafka to ClickHouse Writer
+# =============================================================================
+# Reads events from Kafka and writes them to ClickHouse for analytics.
+# Batches events for efficient bulk inserts.
+# =============================================================================
+
+services:
+  go-consumer:
+    image: ${REGISTRY:-localhost:5000}/fanfinity-consumer:${VERSION:-latest}
+
+    networks:
+      - internal
+
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_GROUP_ID: clickhouse-writer
+      KAFKA_TOPICS: api_events
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "9000"
+      CLICKHOUSE_DATABASE: fanfinity
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      BATCH_SIZE: "1000"
+      FLUSH_INTERVAL: "5s"
+
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          memory: 256M

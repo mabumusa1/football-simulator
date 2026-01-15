@@ -1,0 +1,17 @@
+# =============================================================================
+# DEV BASE CONFIGURATION - Networks & Volumes
+# =============================================================================
+# Development environment base configuration
+# Used with: devcontainer.json
+# =============================================================================
+
+networks:
+  fanfinity-net:
+    driver: bridge
+
+volumes:
+  go-modules:
+  kafka-data:
+  clickhouse-data:
+  prometheus-data:
+  grafana-data:

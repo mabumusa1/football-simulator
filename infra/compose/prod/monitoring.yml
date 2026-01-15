@@ -1,0 +1,78 @@
+services:
+  # ---------------------------------------------------------------------------
+  # PROMETHEUS
+  # ---------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v3.9.1
+
+    networks:
+      - traefik-public
+      - internal
+
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"
+      - "--web.enable-lifecycle"
+      - "--web.enable-admin-api"
+      - "--web.enable-remote-write-receiver"
+      - "--web.external-url=https://prometheus.${DOMAIN}"
+
+    volumes:
+      - ../../prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          memory: 1G
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.prometheus.rule=Host(`prometheus.${DOMAIN}`)"
+        - "traefik.http.routers.prometheus.entrypoints=websecure"
+        - "traefik.http.routers.prometheus.tls=true"
+        - "traefik.http.routers.prometheus.tls.certresolver=letsencrypt"
+        - "traefik.http.services.prometheus.loadbalancer.server.port=9090"
+        - "traefik.http.middlewares.prometheus-auth.basicauth.users=${PROMETHEUS_AUTH}"
+        - "traefik.http.routers.prometheus.middlewares=prometheus-auth"
+
+  # ---------------------------------------------------------------------------
+  # GRAFANA
+  # ---------------------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:12.4.0
+
+    networks:
+      - traefik-public
+      - internal
+
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_PROTOCOL: http
+      GF_SERVER_ROOT_URL: https://grafana.${DOMAIN}
+      GF_SECURITY_COOKIE_SECURE: "true"
+      GF_INSTALL_PLUGINS: grafana-clickhouse-datasource
+
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ../../grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ../../grafana/provisioning:/etc/grafana/provisioning:ro
+
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          memory: 512M
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.grafana.rule=Host(`grafana.${DOMAIN}`)"
+        - "traefik.http.routers.grafana.entrypoints=websecure"
+        - "traefik.http.routers.grafana.tls=true"
+        - "traefik.http.routers.grafana.tls.certresolver=letsencrypt"
+        - "traefik.http.services.grafana.loadbalancer.server.port=3000"

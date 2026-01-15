@@ -1,0 +1,42 @@
+# =============================================================================
+# CLICKHOUSE - Analytics Database
+# =============================================================================
+# Column-oriented database optimized for analytics queries
+# =============================================================================
+
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.12.3.21-alpine
+
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+
+    networks:
+      - internal
+
+    environment:
+      CLICKHOUSE_DB: fanfinity
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ../../clickhouse/config/config.xml:/etc/clickhouse-server/config.d/custom.xml:ro
+      - ../../clickhouse/init:/docker-entrypoint-initdb.d:ro
+
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.clickhouse == true
+      resources:
+        limits:
+          memory: 4G
+
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

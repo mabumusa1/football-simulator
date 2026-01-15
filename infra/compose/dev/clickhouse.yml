@@ -1,0 +1,39 @@
+# =============================================================================
+# DEV CLICKHOUSE - Analytics Database
+# =============================================================================
+# Column-oriented database optimized for analytics queries
+# Development mode with exposed ports and no authentication
+# =============================================================================
+
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.12.3.21-alpine
+
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+
+    ports:
+      - "8123:8123"  # HTTP interface
+      - "9000:9000"  # Native protocol
+
+    environment:
+      CLICKHOUSE_DB: fanfinity
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ""
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ../../clickhouse/init:/docker-entrypoint-initdb.d:ro
+
+    networks:
+      - fanfinity-net
+
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --query 'SELECT 1' || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s

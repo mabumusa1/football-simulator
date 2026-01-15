@@ -1,0 +1,47 @@
+# =============================================================================
+# GO-API - HTTP API Service
+# =============================================================================
+# Receives events via HTTP and produces them to Kafka for async processing.
+# Exposes health, readiness, and Prometheus metrics endpoints.
+# =============================================================================
+
+services:
+  go-api:
+    image: ${REGISTRY:-localhost:5000}/fanfinity-api:${VERSION:-latest}
+
+    networks:
+      - traefik-public
+      - internal
+
+    environment:
+      PORT: "8080"
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_TOPIC: api_events
+
+    deploy:
+      replicas: 3
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+      rollback_config:
+        parallelism: 1
+        delay: 10s
+      resources:
+        limits:
+          memory: 256M
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.api.rule=Host(`api.${DOMAIN}`)"
+        - "traefik.http.routers.api.entrypoints=websecure"
+        - "traefik.http.routers.api.tls=true"
+        - "traefik.http.routers.api.tls.certresolver=letsencrypt"
+        - "traefik.http.services.api.loadbalancer.server.port=8080"
+        - "traefik.http.services.api.loadbalancer.healthcheck.path=/health"
+        - "traefik.http.services.api.loadbalancer.healthcheck.interval=10s"
+
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

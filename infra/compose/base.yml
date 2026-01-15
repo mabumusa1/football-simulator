@@ -1,0 +1,15 @@
+networks:
+  traefik-public:
+    driver: overlay
+    attachable: true
+
+  internal:
+    driver: overlay
+    internal: true
+
+volumes:
+  traefik-letsencrypt:  
+  kafka-data:  
+  clickhouse-data:
+  prometheus-data:
+  grafana-data:

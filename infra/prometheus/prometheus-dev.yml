@@ -1,0 +1,30 @@
+# =============================================================================
+# Prometheus Configuration - Development
+# =============================================================================
+# Simplified scrape configuration for Docker Compose environment
+# =============================================================================
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+  external_labels:
+    environment: development
+    cluster: fanfinity-dev
+
+scrape_configs:
+  # Prometheus Self-Monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          service: prometheus
+
+  # ClickHouse (if metrics enabled)
+  - job_name: 'clickhouse'
+    static_configs:
+      - targets: ['clickhouse:9363']
+        labels:
+          service: clickhouse
+    # Fail silently if ClickHouse metrics not enabled
+    scrape_timeout: 5s

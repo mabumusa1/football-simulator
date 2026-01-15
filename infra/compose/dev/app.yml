@@ -1,0 +1,24 @@
+# =============================================================================
+# DEV APP - Devcontainer Application Service
+# =============================================================================
+# The main development container with Go and Python tooling
+# =============================================================================
+
+services:
+  app:
+    image: mcr.microsoft.com/devcontainers/go:1
+
+    command: sleep infinity
+
+    volumes:
+      - ../../..:/workspace:cached
+      - go-modules:/go/pkg/mod
+
+    networks:
+      - fanfinity-net
+
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy

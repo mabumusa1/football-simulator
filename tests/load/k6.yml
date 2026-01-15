@@ -1,0 +1,51 @@
+services:
+  # ---------------------------------------------------------------------------
+  # K6 LOAD TESTING
+  # ---------------------------------------------------------------------------
+  # Run load tests against the API
+  # Scale to 1 to run tests, scale to 0 when complete
+  #
+  # Usage:
+  #   docker service scale fanfinity_k6=1  # Start test
+  #   docker service logs -f fanfinity_k6  # Watch progress
+  #   docker service scale fanfinity_k6=0  # Stop/complete
+  # ---------------------------------------------------------------------------
+  k6:
+    image: grafana/k6:1.5.0
+
+    networks:
+      - internal
+
+    environment:
+      # Target API URL (internal Docker DNS)
+      API_URL: http://go-api:8080
+      # Prometheus remote write endpoint
+      K6_PROMETHEUS_RW_SERVER_URL: http://prometheus:9090/api/v1/write
+      # Push metrics every 5 seconds
+      K6_PROMETHEUS_RW_PUSH_INTERVAL: 5s
+      # Use native histograms for better precision
+      K6_PROMETHEUS_RW_TREND_AS_NATIVE_HISTOGRAM: "true"
+
+    volumes:
+      - ./k6/scripts:/scripts:ro
+
+    command:
+      - run
+      - --out
+      - experimental-prometheus-rw
+      - /scripts/spike-test.js
+
+    deploy:
+      mode: replicated
+      replicas: 0
+      restart_policy:
+        condition: none
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1'
+        reservations:
+          memory: 256M
+      labels:
+        - "com.fanfinity.service=k6"
+        - "com.fanfinity.type=testing"
