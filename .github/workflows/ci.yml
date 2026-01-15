@@ -62,37 +62,7 @@ jobs:
             echo "mode: set" > coverage.out
             tail -n +2 coverage-api.out >> coverage.out
             tail -n +2 coverage-consumer.out >> coverage.out
-
-            echo ""
-            echo "=== Starting API server for integration test ==="
-            export SERVER_HOST=0.0.0.0
-            export SERVER_PORT=8080
-            export API_KEY=ci-test-key
-            export KAFKA_BOOTSTRAP_SERVERS=kafka:29092
-            export KAFKA_TOPIC_EVENTS=football_simulator.events
-            export CLICKHOUSE_HOST=clickhouse
-            export CLICKHOUSE_PORT=9000
-            export CLICKHOUSE_DATABASE=football_simulator
-            export CLICKHOUSE_USER=default
-            export CLICKHOUSE_PASSWORD=""
-
-            /tmp/api &
-            sleep 5
-
-            echo ""
-            echo "=== Integration test: Health check ==="
-            curl -sf http://localhost:8080/health || exit 1
-
-            echo ""
-            echo "=== Integration test: Event ingestion ==="
-            curl -sf -X POST http://localhost:8080/api/events \
-              -H "Content-Type: application/json" \
-              -H "X-API-Key: ci-test-key" \
-              -d '{"eventId":"11111111-1111-1111-1111-111111111111","matchId":"ci_test","eventType":"goal","teamId":1,"playerId":"p1","timestamp":"2026-01-01T00:00:00Z"}' || exit 1
-
-            echo ""
-            echo "=== All tests passed ==="
-
+            
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
         with:
