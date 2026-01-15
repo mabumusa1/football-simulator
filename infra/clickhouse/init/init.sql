@@ -1,4 +1,6 @@
+-- Initialize football_simulator database and schema
 CREATE DATABASE IF NOT EXISTS football_simulator;
+
 CREATE TABLE IF NOT EXISTS football_simulator.api_events (
     event_id UUID DEFAULT generateUUIDv4(),
     timestamp DateTime DEFAULT now(),
