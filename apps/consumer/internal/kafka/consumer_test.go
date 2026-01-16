@@ -2,6 +2,7 @@ package kafka
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"os"
@@ -1887,7 +1888,7 @@ func TestEngagementConsumer_WorkerWithMessages(t *testing.T) {
 	}
 
 	// Serialize and write the message
-	eventJSON, _ := event.ToJSON()
+	eventJSON, _ := json.Marshal(event)
 	msg := kafka.Message{
 		Key:   []byte(event.MatchID),
 		Value: eventJSON,

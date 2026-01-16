@@ -1,6 +1,6 @@
 module github.com/mabumusa1/football-simulator/apps/api
 
-go 1.21
+go 1.24
 
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.17.1
