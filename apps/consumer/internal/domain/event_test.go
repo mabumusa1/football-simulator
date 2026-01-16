@@ -476,7 +476,9 @@ func TestValidEventTypes(t *testing.T) {
 	expectedTypes := []EventType{
 		EventTypePass,
 		EventTypeShot,
+		EventTypeShotOnTarget,
 		EventTypeGoal,
+		EventTypeOwnGoal,
 		EventTypeFoul,
 		EventTypeYellowCard,
 		EventTypeRedCard,
@@ -484,7 +486,17 @@ func TestValidEventTypes(t *testing.T) {
 		EventTypeOffside,
 		EventTypeCorner,
 		EventTypeFreeKick,
+		EventTypePenalty,
+		EventTypePenaltySaved,
 		EventTypeInterception,
+		EventTypeTackle,
+		EventTypeSave,
+		EventTypeInjury,
+		EventTypeVARReview,
+		EventTypeKickoff,
+		EventTypeHalfTime,
+		EventTypeSecondHalf,
+		EventTypeFullTime,
 	}
 
 	if len(ValidEventTypes) != len(expectedTypes) {

@@ -1,0 +1,67 @@
+version: 2
+
+updates:
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    commit-message:
+      prefix: "ci"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    open-pull-requests-limit: 5
+
+  # Go modules - API
+  - package-ecosystem: "gomod"
+    directory: "/apps/api"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    commit-message:
+      prefix: "deps(api)"
+    labels:
+      - "dependencies"
+      - "go"
+    open-pull-requests-limit: 5
+    groups:
+      go-minor:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Go modules - Consumer
+  - package-ecosystem: "gomod"
+    directory: "/apps/consumer"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    commit-message:
+      prefix: "deps(consumer)"
+    labels:
+      - "dependencies"
+      - "go"
+    open-pull-requests-limit: 5
+    groups:
+      go-minor:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Ruby gems - Documentation
+  - package-ecosystem: "bundler"
+    directory: "/docs"
+    schedule:
+      interval: "monthly"
+    commit-message:
+      prefix: "docs"
+    labels:
+      - "dependencies"
+      - "documentation"
+    open-pull-requests-limit: 3

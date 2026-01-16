@@ -586,3 +586,244 @@ func TestConnectionConfig_CustomValues(t *testing.T) {
 		t.Errorf("expected MaxOpenConns 20, got %d", cfg.MaxOpenConns)
 	}
 }
+
+func TestClickHouseRepository_InsertEngagementBatch_EmptySlice(t *testing.T) {
+	mockConn := &MockConn{}
+	repo := NewClickHouseRepository(mockConn, newTestLogger())
+
+	err := repo.InsertEngagementBatch(context.Background(), []*domain.EngagementEvent{})
+	if err != nil {
+		t.Errorf("expected no error for empty slice, got %v", err)
+	}
+}
+
+func TestClickHouseRepository_InsertEngagementBatch_NilSlice(t *testing.T) {
+	mockConn := &MockConn{}
+	repo := NewClickHouseRepository(mockConn, newTestLogger())
+
+	err := repo.InsertEngagementBatch(context.Background(), nil)
+	if err != nil {
+		t.Errorf("expected no error for nil slice, got %v", err)
+	}
+}
+
+func TestClickHouseRepository_InsertEngagementBatch_PrepareBatchError(t *testing.T) {
+	expectedErr := errors.New("prepare batch failed")
+	mockConn := &MockConn{
+		PrepareBatchFunc: func(ctx context.Context, query string, opts ...driver.PrepareBatchOption) (driver.Batch, error) {
+			return nil, expectedErr
+		},
+	}
+	repo := NewClickHouseRepository(mockConn, newTestLogger())
+
+	events := []*domain.EngagementEvent{
+		{
+			EventID:        uuid.New(),
+			MatchID:        "match-123",
+			UserID:         "user-456",
+			SessionID:      "session-789",
+			EngagementType: domain.EngagementTypeReaction,
+			Timestamp:      time.Now(),
+		},
+	}
+
+	err := repo.InsertEngagementBatch(context.Background(), events)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestClickHouseRepository_InsertEngagementBatch_Success(t *testing.T) {
+	mockBatch := &MockBatch{}
+	mockConn := &MockConn{
+		PrepareBatchFunc: func(ctx context.Context, query string, opts ...driver.PrepareBatchOption) (driver.Batch, error) {
+			return mockBatch, nil
+		},
+	}
+	repo := NewClickHouseRepository(mockConn, newTestLogger())
+
+	events := []*domain.EngagementEvent{
+		{
+			EventID:        uuid.New(),
+			MatchID:        "match-123",
+			UserID:         "user-456",
+			SessionID:      "session-789",
+			EngagementType: domain.EngagementTypeReaction,
+			Timestamp:      time.Now(),
+			Metadata:       map[string]interface{}{"source": "test"},
+		},
+		{
+			EventID:        uuid.New(),
+			MatchID:        "match-123",
+			UserID:         "user-789",
+			SessionID:      "session-012",
+			EngagementType: domain.EngagementTypeComment,
+			Timestamp:      time.Now(),
+		},
+	}
+
+	err := repo.InsertEngagementBatch(context.Background(), events)
+	if err != nil {
+		t.Errorf("expected no error, got %v", err)
+	}
+
+	if mockBatch.AppendCount != 2 {
+		t.Errorf("expected 2 appends, got %d", mockBatch.AppendCount)
+	}
+}
+
+func TestClickHouseRepository_InsertEngagementBatch_SendError(t *testing.T) {
+	expectedErr := errors.New("send failed")
+	mockBatch := &MockBatch{
+		SendFunc: func() error {
+			return expectedErr
+		},
+	}
+	mockConn := &MockConn{
+		PrepareBatchFunc: func(ctx context.Context, query string, opts ...driver.PrepareBatchOption) (driver.Batch, error) {
+			return mockBatch, nil
+		},
+	}
+	repo := NewClickHouseRepository(mockConn, newTestLogger())
+
+	events := []*domain.EngagementEvent{
+		{
+			EventID:        uuid.New(),
+			MatchID:        "match-123",
+			UserID:         "user-456",
+			EngagementType: domain.EngagementTypeReaction,
+			Timestamp:      time.Now(),
+		},
+	}
+
+	err := repo.InsertEngagementBatch(context.Background(), events)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestClickHouseRepository_InsertEngagementBatch_NilEventSkipped(t *testing.T) {
+	mockBatch := &MockBatch{}
+	mockConn := &MockConn{
+		PrepareBatchFunc: func(ctx context.Context, query string, opts ...driver.PrepareBatchOption) (driver.Batch, error) {
+			return mockBatch, nil
+		},
+	}
+	repo := NewClickHouseRepository(mockConn, newTestLogger())
+
+	events := []*domain.EngagementEvent{
+		{
+			EventID:        uuid.New(),
+			MatchID:        "match-123",
+			UserID:         "user-456",
+			EngagementType: domain.EngagementTypeReaction,
+			Timestamp:      time.Now(),
+		},
+		nil, // This should be skipped
+		{
+			EventID:        uuid.New(),
+			MatchID:        "match-456",
+			UserID:         "user-789",
+			EngagementType: domain.EngagementTypeComment,
+			Timestamp:      time.Now(),
+		},
+	}
+
+	err := repo.InsertEngagementBatch(context.Background(), events)
+	if err != nil {
+		t.Errorf("expected no error, got %v", err)
+	}
+
+	// Only 2 events should be appended (nil is skipped)
+	if mockBatch.AppendCount != 2 {
+		t.Errorf("expected 2 appends (nil skipped), got %d", mockBatch.AppendCount)
+	}
+}
+
+func TestClickHouseRepository_InsertEngagementBatch_AppendError(t *testing.T) {
+	appendCalls := 0
+	mockBatch := &MockBatch{
+		AppendFunc: func(v ...interface{}) error {
+			appendCalls++
+			if appendCalls == 1 {
+				return errors.New("append failed")
+			}
+			return nil
+		},
+	}
+	mockConn := &MockConn{
+		PrepareBatchFunc: func(ctx context.Context, query string, opts ...driver.PrepareBatchOption) (driver.Batch, error) {
+			return mockBatch, nil
+		},
+	}
+	repo := NewClickHouseRepository(mockConn, newTestLogger())
+
+	events := []*domain.EngagementEvent{
+		{
+			EventID:        uuid.New(),
+			MatchID:        "match-123",
+			UserID:         "user-456",
+			EngagementType: domain.EngagementTypeReaction,
+			Timestamp:      time.Now(),
+		},
+		{
+			EventID:        uuid.New(),
+			MatchID:        "match-456",
+			UserID:         "user-789",
+			EngagementType: domain.EngagementTypeComment,
+			Timestamp:      time.Now(),
+		},
+	}
+
+	// Append error should not fail the entire batch
+	err := repo.InsertEngagementBatch(context.Background(), events)
+	if err != nil {
+		t.Errorf("expected no error (append errors are logged and skipped), got %v", err)
+	}
+}
+
+func TestClickHouseRepository_InsertEngagementBatch_AllFields(t *testing.T) {
+	var capturedArgs []interface{}
+	mockBatch := &MockBatch{
+		AppendFunc: func(v ...interface{}) error {
+			capturedArgs = v
+			return nil
+		},
+	}
+	mockConn := &MockConn{
+		PrepareBatchFunc: func(ctx context.Context, query string, opts ...driver.PrepareBatchOption) (driver.Batch, error) {
+			return mockBatch, nil
+		},
+	}
+	repo := NewClickHouseRepository(mockConn, newTestLogger())
+
+	relatedGameEventID := uuid.New()
+	events := []*domain.EngagementEvent{
+		{
+			EventID:            uuid.New(),
+			MatchID:            "match-123",
+			UserID:             "user-456",
+			SessionID:          "session-789",
+			EngagementType:     domain.EngagementTypeReaction,
+			EngagementSubtype:  "like",
+			RelatedGameEventID: &relatedGameEventID,
+			GameMinute:         45,
+			DeviceType:         "mobile",
+			Platform:           "ios",
+			CountryCode:        "US",
+			Content:            "Great goal!",
+			Timestamp:          time.Now(),
+			Metadata:           map[string]interface{}{"source": "app"},
+		},
+	}
+
+	err := repo.InsertEngagementBatch(context.Background(), events)
+	if err != nil {
+		t.Errorf("expected no error, got %v", err)
+	}
+
+	// Verify all fields were passed (14 fields total)
+	if len(capturedArgs) != 14 {
+		t.Errorf("expected 14 args, got %d", len(capturedArgs))
+	}
+}

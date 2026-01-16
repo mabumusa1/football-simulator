@@ -9,27 +9,47 @@ import (
 func TestLoadConfig_DefaultValues(t *testing.T) {
 	// Clear any existing environment variables
 	envVars := []string{
+		"SERVER_HOST",
+		"SERVER_PORT",
+		"SERVER_READ_TIMEOUT",
+		"SERVER_WRITE_TIMEOUT",
+		"SERVER_IDLE_TIMEOUT",
 		"KAFKA_BOOTSTRAP_SERVERS",
 		"KAFKA_TOPIC_PREFIX",
 		"KAFKA_TOPIC_EVENTS",
+		"KAFKA_TOPIC_ENGAGEMENTS",
 		"KAFKA_TOPIC_RETRY",
 		"KAFKA_TOPIC_DEAD",
+		"KAFKA_PRODUCER_TIMEOUT",
 		"CLICKHOUSE_HOST",
 		"CLICKHOUSE_PORT",
 		"CLICKHOUSE_DATABASE",
 		"CLICKHOUSE_USER",
 		"CLICKHOUSE_PASSWORD",
-		"CONSUMER_BATCH_SIZE",
-		"CONSUMER_FLUSH_INTERVAL",
-		"CONSUMER_MAX_RETRIES",
-		"CONSUMER_RETRY_BACKOFF",
-		"CONSUMER_GROUP",
+		"API_KEY",
 	}
 	for _, env := range envVars {
 		_ = os.Unsetenv(env)
 	}
 
 	cfg := LoadConfig()
+
+	// Test Server defaults
+	if cfg.Server.Host != "0.0.0.0" {
+		t.Errorf("expected default Server.Host '0.0.0.0', got %s", cfg.Server.Host)
+	}
+	if cfg.Server.Port != 8080 {
+		t.Errorf("expected default Server.Port 8080, got %d", cfg.Server.Port)
+	}
+	if cfg.Server.ReadTimeout != 10*time.Second {
+		t.Errorf("expected default Server.ReadTimeout 10s, got %v", cfg.Server.ReadTimeout)
+	}
+	if cfg.Server.WriteTimeout != 10*time.Second {
+		t.Errorf("expected default Server.WriteTimeout 10s, got %v", cfg.Server.WriteTimeout)
+	}
+	if cfg.Server.IdleTimeout != 60*time.Second {
+		t.Errorf("expected default Server.IdleTimeout 60s, got %v", cfg.Server.IdleTimeout)
+	}
 
 	// Test Kafka defaults
 	if cfg.Kafka.BootstrapServers != "kafka:29092" {
@@ -41,11 +61,17 @@ func TestLoadConfig_DefaultValues(t *testing.T) {
 	if cfg.Kafka.TopicEvents != "football_simulator.events" {
 		t.Errorf("expected default TopicEvents 'football_simulator.events', got %s", cfg.Kafka.TopicEvents)
 	}
+	if cfg.Kafka.TopicEngagements != "football_simulator.engagements" {
+		t.Errorf("expected default TopicEngagements 'football_simulator.engagements', got %s", cfg.Kafka.TopicEngagements)
+	}
 	if cfg.Kafka.TopicRetry != "football_simulator.retry" {
 		t.Errorf("expected default TopicRetry 'football_simulator.retry', got %s", cfg.Kafka.TopicRetry)
 	}
 	if cfg.Kafka.TopicDead != "football_simulator.dead" {
 		t.Errorf("expected default TopicDead 'football_simulator.dead', got %s", cfg.Kafka.TopicDead)
+	}
+	if cfg.Kafka.ProducerTimeout != 10*time.Second {
+		t.Errorf("expected default ProducerTimeout 10s, got %v", cfg.Kafka.ProducerTimeout)
 	}
 
 	// Test ClickHouse defaults
@@ -65,31 +91,46 @@ func TestLoadConfig_DefaultValues(t *testing.T) {
 		t.Errorf("expected default Password '', got %s", cfg.ClickHouse.Password)
 	}
 
-	// Test Consumer defaults
-	if cfg.Consumer.BatchSize != 500 {
-		t.Errorf("expected default BatchSize 500, got %d", cfg.Consumer.BatchSize)
+	// Test API Key default
+	if cfg.APIKey != "" {
+		t.Errorf("expected default APIKey '', got %s", cfg.APIKey)
 	}
-	if cfg.Consumer.FlushInterval != 1*time.Second {
-		t.Errorf("expected default FlushInterval 1s, got %v", cfg.Consumer.FlushInterval)
+}
+
+func TestLoadConfig_CustomServerValues(t *testing.T) {
+	t.Setenv("SERVER_HOST", "127.0.0.1")
+	t.Setenv("SERVER_PORT", "3000")
+	t.Setenv("SERVER_READ_TIMEOUT", "30s")
+	t.Setenv("SERVER_WRITE_TIMEOUT", "45s")
+	t.Setenv("SERVER_IDLE_TIMEOUT", "120s")
+
+	cfg := LoadConfig()
+
+	if cfg.Server.Host != "127.0.0.1" {
+		t.Errorf("expected Server.Host '127.0.0.1', got %s", cfg.Server.Host)
 	}
-	if cfg.Consumer.MaxRetries != 3 {
-		t.Errorf("expected default MaxRetries 3, got %d", cfg.Consumer.MaxRetries)
+	if cfg.Server.Port != 3000 {
+		t.Errorf("expected Server.Port 3000, got %d", cfg.Server.Port)
 	}
-	if cfg.Consumer.RetryBackoff != 1*time.Second {
-		t.Errorf("expected default RetryBackoff 1s, got %v", cfg.Consumer.RetryBackoff)
+	if cfg.Server.ReadTimeout != 30*time.Second {
+		t.Errorf("expected Server.ReadTimeout 30s, got %v", cfg.Server.ReadTimeout)
 	}
-	if cfg.Consumer.ConsumerGroup != "football_simulator-consumers" {
-		t.Errorf("expected default ConsumerGroup 'football_simulator-consumers', got %s", cfg.Consumer.ConsumerGroup)
+	if cfg.Server.WriteTimeout != 45*time.Second {
+		t.Errorf("expected Server.WriteTimeout 45s, got %v", cfg.Server.WriteTimeout)
+	}
+	if cfg.Server.IdleTimeout != 120*time.Second {
+		t.Errorf("expected Server.IdleTimeout 120s, got %v", cfg.Server.IdleTimeout)
 	}
 }
 
 func TestLoadConfig_CustomKafkaValues(t *testing.T) {
-	// Set custom Kafka environment variables
 	t.Setenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
 	t.Setenv("KAFKA_TOPIC_PREFIX", "custom_prefix")
 	t.Setenv("KAFKA_TOPIC_EVENTS", "custom.events")
+	t.Setenv("KAFKA_TOPIC_ENGAGEMENTS", "custom.engagements")
 	t.Setenv("KAFKA_TOPIC_RETRY", "custom.retry")
 	t.Setenv("KAFKA_TOPIC_DEAD", "custom.dead")
+	t.Setenv("KAFKA_PRODUCER_TIMEOUT", "20s")
 
 	cfg := LoadConfig()
 
@@ -102,16 +143,21 @@ func TestLoadConfig_CustomKafkaValues(t *testing.T) {
 	if cfg.Kafka.TopicEvents != "custom.events" {
 		t.Errorf("expected TopicEvents 'custom.events', got %s", cfg.Kafka.TopicEvents)
 	}
+	if cfg.Kafka.TopicEngagements != "custom.engagements" {
+		t.Errorf("expected TopicEngagements 'custom.engagements', got %s", cfg.Kafka.TopicEngagements)
+	}
 	if cfg.Kafka.TopicRetry != "custom.retry" {
 		t.Errorf("expected TopicRetry 'custom.retry', got %s", cfg.Kafka.TopicRetry)
 	}
 	if cfg.Kafka.TopicDead != "custom.dead" {
 		t.Errorf("expected TopicDead 'custom.dead', got %s", cfg.Kafka.TopicDead)
 	}
+	if cfg.Kafka.ProducerTimeout != 20*time.Second {
+		t.Errorf("expected ProducerTimeout 20s, got %v", cfg.Kafka.ProducerTimeout)
+	}
 }
 
 func TestLoadConfig_CustomClickHouseValues(t *testing.T) {
-	// Set custom ClickHouse environment variables
 	t.Setenv("CLICKHOUSE_HOST", "localhost")
 	t.Setenv("CLICKHOUSE_PORT", "9001")
 	t.Setenv("CLICKHOUSE_DATABASE", "test_db")
@@ -137,30 +183,13 @@ func TestLoadConfig_CustomClickHouseValues(t *testing.T) {
 	}
 }
 
-func TestLoadConfig_CustomConsumerValues(t *testing.T) {
-	// Set custom Consumer environment variables
-	t.Setenv("CONSUMER_BATCH_SIZE", "500")
-	t.Setenv("CONSUMER_FLUSH_INTERVAL", "10s")
-	t.Setenv("CONSUMER_MAX_RETRIES", "5")
-	t.Setenv("CONSUMER_RETRY_BACKOFF", "2s")
-	t.Setenv("CONSUMER_GROUP", "custom-group")
+func TestLoadConfig_CustomAPIKey(t *testing.T) {
+	t.Setenv("API_KEY", "my-secret-api-key")
 
 	cfg := LoadConfig()
 
-	if cfg.Consumer.BatchSize != 500 {
-		t.Errorf("expected BatchSize 500, got %d", cfg.Consumer.BatchSize)
-	}
-	if cfg.Consumer.FlushInterval != 10*time.Second {
-		t.Errorf("expected FlushInterval 10s, got %v", cfg.Consumer.FlushInterval)
-	}
-	if cfg.Consumer.MaxRetries != 5 {
-		t.Errorf("expected MaxRetries 5, got %d", cfg.Consumer.MaxRetries)
-	}
-	if cfg.Consumer.RetryBackoff != 2*time.Second {
-		t.Errorf("expected RetryBackoff 2s, got %v", cfg.Consumer.RetryBackoff)
-	}
-	if cfg.Consumer.ConsumerGroup != "custom-group" {
-		t.Errorf("expected ConsumerGroup 'custom-group', got %s", cfg.Consumer.ConsumerGroup)
+	if cfg.APIKey != "my-secret-api-key" {
+		t.Errorf("expected APIKey 'my-secret-api-key', got %s", cfg.APIKey)
 	}
 }
 
@@ -236,6 +265,15 @@ func TestGetEnvInt_Zero(t *testing.T) {
 	}
 }
 
+func TestGetEnvInt_FloatValue(t *testing.T) {
+	t.Setenv("INT_VAR", "3.14")
+
+	result := getEnvInt("INT_VAR", 10)
+	if result != 10 {
+		t.Errorf("expected default 10 for float input, got %d", result)
+	}
+}
+
 func TestGetEnvDuration_ValidDuration(t *testing.T) {
 	testCases := []struct {
 		input    string
@@ -246,6 +284,7 @@ func TestGetEnvDuration_ValidDuration(t *testing.T) {
 		{"1h", 1 * time.Hour},
 		{"100ms", 100 * time.Millisecond},
 		{"2h30m", 2*time.Hour + 30*time.Minute},
+		{"500us", 500 * time.Microsecond},
 	}
 
 	for _, tc := range testCases {
@@ -287,10 +326,24 @@ func TestGetEnvDuration_EmptyValue(t *testing.T) {
 	}
 }
 
+func TestGetEnvDuration_NumericWithoutUnit(t *testing.T) {
+	t.Setenv("DURATION_VAR", "100")
+
+	result := getEnvDuration("DURATION_VAR", 5*time.Second)
+	// "100" without unit is invalid, should return default
+	if result != 5*time.Second {
+		t.Errorf("expected default 5s for numeric without unit, got %v", result)
+	}
+}
+
 func TestLoadConfig_PartialOverride(t *testing.T) {
+	// Clear all first
+	_ = os.Unsetenv("SERVER_HOST")
+	_ = os.Unsetenv("SERVER_PORT")
+
 	// Only set some values, others should use defaults
 	t.Setenv("KAFKA_BOOTSTRAP_SERVERS", "custom-kafka:9092")
-	t.Setenv("CONSUMER_BATCH_SIZE", "2000")
+	t.Setenv("SERVER_PORT", "9000")
 
 	cfg := LoadConfig()
 
@@ -298,15 +351,59 @@ func TestLoadConfig_PartialOverride(t *testing.T) {
 	if cfg.Kafka.BootstrapServers != "custom-kafka:9092" {
 		t.Errorf("expected BootstrapServers 'custom-kafka:9092', got %s", cfg.Kafka.BootstrapServers)
 	}
-	if cfg.Consumer.BatchSize != 2000 {
-		t.Errorf("expected BatchSize 2000, got %d", cfg.Consumer.BatchSize)
+	if cfg.Server.Port != 9000 {
+		t.Errorf("expected Server.Port 9000, got %d", cfg.Server.Port)
 	}
 
 	// Default values should still work
+	if cfg.Server.Host != "0.0.0.0" {
+		t.Errorf("expected default Server.Host '0.0.0.0', got %s", cfg.Server.Host)
+	}
 	if cfg.Kafka.TopicEvents != "football_simulator.events" {
 		t.Errorf("expected default TopicEvents, got %s", cfg.Kafka.TopicEvents)
 	}
-	if cfg.Consumer.MaxRetries != 3 {
-		t.Errorf("expected default MaxRetries 3, got %d", cfg.Consumer.MaxRetries)
+}
+
+func TestConfig_Structs(t *testing.T) {
+	// Test that Config struct has all expected fields
+	cfg := &Config{
+		Server: ServerConfig{
+			Host:         "localhost",
+			Port:         8080,
+			ReadTimeout:  10 * time.Second,
+			WriteTimeout: 10 * time.Second,
+			IdleTimeout:  60 * time.Second,
+		},
+		Kafka: KafkaConfig{
+			BootstrapServers: "kafka:9092",
+			TopicPrefix:      "prefix",
+			TopicEvents:      "events",
+			TopicEngagements: "engagements",
+			TopicRetry:       "retry",
+			TopicDead:        "dead",
+			ProducerTimeout:  10 * time.Second,
+		},
+		ClickHouse: ClickHouseConfig{
+			Host:     "clickhouse",
+			Port:     9000,
+			Database: "db",
+			User:     "user",
+			Password: "pass",
+		},
+		APIKey: "key",
+	}
+
+	// Verify values are set correctly
+	if cfg.Server.Host != "localhost" {
+		t.Error("Config struct Server.Host not set correctly")
+	}
+	if cfg.Kafka.BootstrapServers != "kafka:9092" {
+		t.Error("Config struct Kafka.BootstrapServers not set correctly")
+	}
+	if cfg.ClickHouse.Host != "clickhouse" {
+		t.Error("Config struct ClickHouse.Host not set correctly")
+	}
+	if cfg.APIKey != "key" {
+		t.Error("Config struct APIKey not set correctly")
 	}
 }

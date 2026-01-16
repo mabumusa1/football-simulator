@@ -1,0 +1,199 @@
+name: Rollback Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to rollback to (e.g., v1.0.0)'
+        required: true
+        type: string
+      confirm:
+        description: 'Type "ROLLBACK" to confirm'
+        required: true
+        type: string
+
+# Prevent concurrent rollbacks
+concurrency:
+  group: deployment
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+  ECR_REGISTRY: ${{ vars.ECR_REGISTRY }}
+  STACK_NAME: ${{ vars.STACK_NAME }}
+  EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
+
+jobs:
+  validate:
+    name: Validate Rollback
+    runs-on: ubuntu-latest
+    outputs:
+      proceed: ${{ steps.validate.outputs.proceed }}
+
+    steps:
+      - name: Validate confirmation
+        id: validate
+        run: |
+          if [[ "${{ github.event.inputs.confirm }}" != "ROLLBACK" ]]; then
+            echo "::error::Confirmation failed. You must type 'ROLLBACK' to proceed."
+            echo "proceed=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          echo "proceed=true" >> $GITHUB_OUTPUT
+          echo "::notice::Rollback confirmed for version ${{ github.event.inputs.version }}"
+
+  rollback:
+    name: Rollback to ${{ github.event.inputs.version }}
+    runs-on: ubuntu-latest
+    needs: validate
+    if: needs.validate.outputs.proceed == 'true'
+    environment: demo
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          role-session-name: GitHubActions-Rollback-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify images exist in ECR
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+
+          echo "Checking if images exist for version ${VERSION}..."
+
+          # Check API image
+          aws ecr describe-images \
+            --repository-name "${{ env.STACK_NAME }}/go-api" \
+            --image-ids imageTag="${VERSION}" \
+            --region "${{ env.AWS_REGION }}" || {
+              echo "::error::API image not found for version ${VERSION}"
+              exit 1
+            }
+
+          # Check Consumer image
+          aws ecr describe-images \
+            --repository-name "${{ env.STACK_NAME }}/go-consumer" \
+            --image-ids imageTag="${VERSION}" \
+            --region "${{ env.AWS_REGION }}" || {
+              echo "::error::Consumer image not found for version ${VERSION}"
+              exit 1
+            }
+
+          echo "::notice::Both images found for version ${VERSION}"
+
+      - name: Rollback via SSM
+        id: rollback
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          INSTANCE_ID="${{ env.EC2_INSTANCE_ID }}"
+
+          echo "Rolling back to version ${VERSION} on instance ${INSTANCE_ID}..."
+
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "${INSTANCE_ID}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters commands="[
+              \"cd /opt/football/app\",
+              \"echo 'Rolling back to version ${VERSION}...'\",
+              \"echo 'Updating VERSION in .env...'\",
+              \"sed -i 's/^VERSION=.*/VERSION=${VERSION}/' .env\",
+              \"echo 'Logging into ECR...'\",
+              \"aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}\",
+              \"echo 'Pulling rollback images...'\",
+              \"docker pull ${ECR_REGISTRY}/${STACK_NAME}/go-api:${VERSION}\",
+              \"docker pull ${ECR_REGISTRY}/${STACK_NAME}/go-consumer:${VERSION}\",
+              \"echo 'Deploying rollback version...'\",
+              \"./scripts/deploy.sh go-api go-consumer\",
+              \"echo 'Rollback deployment complete!'\",
+              \"docker service ls\"
+            ]" \
+            --timeout-seconds 300 \
+            --output text \
+            --query "Command.CommandId")
+
+          echo "Command ID: ${COMMAND_ID}"
+
+          # Wait for command to complete
+          aws ssm wait command-executed \
+            --command-id "${COMMAND_ID}" \
+            --instance-id "${INSTANCE_ID}" || true
+
+          # Get command output
+          RESULT=$(aws ssm get-command-invocation \
+            --command-id "${COMMAND_ID}" \
+            --instance-id "${INSTANCE_ID}" \
+            --query "[Status, StatusDetails, StandardOutputContent, StandardErrorContent]" \
+            --output json)
+
+          STATUS=$(echo $RESULT | jq -r '.[0]')
+          STDOUT=$(echo $RESULT | jq -r '.[2]')
+          STDERR=$(echo $RESULT | jq -r '.[3]')
+
+          echo "Status: ${STATUS}"
+
+          if [[ "${STATUS}" == "Success" ]]; then
+            echo "::notice::Rollback to version ${VERSION} completed successfully"
+          else
+            echo "STDOUT: ${STDOUT}"
+            echo "STDERR: ${STDERR}"
+            echo "::error::Rollback failed!"
+            exit 1
+          fi
+
+      - name: Verify rollback health
+        run: |
+          echo "Verifying rollback health..."
+          INSTANCE_ID="${{ env.EC2_INSTANCE_ID }}"
+
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "${INSTANCE_ID}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters commands="[
+              \"for i in {1..30}; do\",
+              \"  STATUS=\\$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/health || echo '000')\",
+              \"  if [ \\\"\\$STATUS\\\" = '200' ]; then\",
+              \"    echo 'Health check passed!'\",
+              \"    exit 0\",
+              \"  fi\",
+              \"  echo \\\"Attempt \\$i: Status \\$STATUS, retrying...\\\"\",
+              \"  sleep 10\",
+              \"done\",
+              \"echo 'Health check failed'\",
+              \"exit 1\"
+            ]" \
+            --timeout-seconds 600 \
+            --output text \
+            --query "Command.CommandId")
+
+          aws ssm wait command-executed \
+            --command-id "${COMMAND_ID}" \
+            --instance-id "${INSTANCE_ID}" || true
+
+          STATUS=$(aws ssm get-command-invocation \
+            --command-id "${COMMAND_ID}" \
+            --instance-id "${INSTANCE_ID}" \
+            --query "Status" \
+            --output text)
+
+          if [[ "${STATUS}" != "Success" ]]; then
+            echo "::error::Health check failed after rollback!"
+            exit 1
+          fi
+
+          echo "::notice::Rollback health check passed!"
+
+      - name: Rollback summary
+        run: |
+          echo "## 🔄 Rollback Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Rolled back to:** \`${{ github.event.inputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Instance:** \`${{ env.EC2_INSTANCE_ID }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Initiated by:** @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** ✅ Success" >> $GITHUB_STEP_SUMMARY

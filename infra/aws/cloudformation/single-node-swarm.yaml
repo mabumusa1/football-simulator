@@ -459,74 +459,64 @@ Resources:
           Value: !Ref Environment
 
   # ---------------------------------------------------------------------------
-  # GITHUB ACTIONS OIDC (Secure CI/CD without access keys)
-  # NOTE: Commented out - AWS::IAM::OIDCIdentityProvider not available
-  # Set up GitHub OIDC manually via AWS Console after stack creation
+  # GITHUB ACTIONS IAM ROLE
+  # NOTE: OIDC Provider must be created manually first (one-time per account):
+  #   aws iam create-open-id-connect-provider \
+  #     --url https://token.actions.githubusercontent.com \
+  #     --client-id-list sts.amazonaws.com \
+  #     --thumbprint-list 6938fd4d98bab03faadb97b34396831e3780aea1
   # ---------------------------------------------------------------------------
-  # GitHubOIDCProvider:
-  #   Type: AWS::IAM::OIDCIdentityProvider
-  #   Properties:
-  #     Url: https://token.actions.githubusercontent.com
-  #     ClientIdList:
-  #       - sts.amazonaws.com
-  #     ThumbprintList:
-  #       - 6938fd4d98bab03faadb97b34396831e3780aea1
-  #       - 1c58a3a8518e8759bf075b76b750d4f2df264fcd
-  #     Tags:
-  #       - Key: Name
-  #         Value: !Sub ${AWS::StackName}-github-oidc
-  #
-  # GitHubActionsRole:
-  #   Type: AWS::IAM::Role
-  #   Properties:
-  #     RoleName: !Sub ${AWS::StackName}-github-actions
-  #     AssumeRolePolicyDocument:
-  #       Version: '2012-10-17'
-  #       Statement:
-  #         - Effect: Allow
-  #           Principal:
-  #             Federated: !Ref GitHubOIDCProvider
-  #           Action: sts:AssumeRoleWithWebIdentity
-  #           Condition:
-  #             StringLike:
-  #               token.actions.githubusercontent.com:sub: !Sub repo:*:*
-  #             StringEquals:
-  #               token.actions.githubusercontent.com:aud: sts.amazonaws.com
-  #     Policies:
-  #       - PolicyName: ECRPushPolicy
-  #         PolicyDocument:
-  #           Version: '2012-10-17'
-  #           Statement:
-  #             - Effect: Allow
-  #               Action:
-  #                 - ecr:GetAuthorizationToken
-  #               Resource: '*'
-  #             - Effect: Allow
-  #               Action:
-  #                 - ecr:BatchCheckLayerAvailability
-  #                 - ecr:GetDownloadUrlForLayer
-  #                 - ecr:BatchGetImage
-  #                 - ecr:PutImage
-  #                 - ecr:InitiateLayerUpload
-  #                 - ecr:UploadLayerPart
-  #                 - ecr:CompleteLayerUpload
-  #               Resource:
-  #                 - !GetAtt GoApiRepository.Arn
-  #                 - !GetAtt GoConsumerRepository.Arn
-  #       - PolicyName: SSMDeployPolicy
-  #         PolicyDocument:
-  #           Version: '2012-10-17'
-  #           Statement:
-  #             - Effect: Allow
-  #               Action:
-  #                 - ssm:SendCommand
-  #                 - ssm:GetCommandInvocation
-  #               Resource:
-  #                 - !Sub arn:aws:ssm:${AWS::Region}::document/AWS-RunShellScript
-  #                 - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/${SwarmInstance}
-  #     Tags:
-  #       - Key: Name
-  #         Value: !Sub ${AWS::StackName}-github-actions-role
+  GitHubActionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-github-actions
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub arn:aws:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringLike:
+                token.actions.githubusercontent.com:sub: repo:mabumusa1/*:*
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+      Policies:
+        - PolicyName: ECRPushPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                  - ecr:PutImage
+                  - ecr:InitiateLayerUpload
+                  - ecr:UploadLayerPart
+                  - ecr:CompleteLayerUpload
+                Resource:
+                  - !GetAtt GoApiRepository.Arn
+                  - !GetAtt GoConsumerRepository.Arn
+        - PolicyName: SSMDeployPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:SendCommand
+                  - ssm:GetCommandInvocation
+                Resource:
+                  - !Sub arn:aws:ssm:${AWS::Region}::document/AWS-RunShellScript
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-github-actions-role
 
   # ---------------------------------------------------------------------------
   # EC2 INSTANCE
@@ -576,13 +566,13 @@ Resources:
           # SYSTEM UPDATES
           # ------------------------------------------------------------------
           echo "[1/8] Updating system packages..."
-          dnf update -y
+          yum update -y
 
           # ------------------------------------------------------------------
           # INSTALL DOCKER
           # ------------------------------------------------------------------
           echo "[2/8] Installing Docker..."
-          dnf install -y docker
+          yum install -y docker
           systemctl enable docker
           systemctl start docker
 
@@ -610,10 +600,10 @@ Resources:
           # INSTALL ADDITIONAL TOOLS
           # ------------------------------------------------------------------
           echo "[4/8] Installing additional tools..."
-          dnf install -y git jq htop
+          yum install -y git jq htop
 
-          # Install CloudWatch agent
-          dnf install -y amazon-cloudwatch-agent
+          # Install CloudWatch agent and CFN bootstrap
+          yum install -y amazon-cloudwatch-agent aws-cfn-bootstrap
 
           # Configure CloudWatch agent
           cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json << 'CWCONFIG'
@@ -900,6 +890,14 @@ Resources:
             echo "Cloning repository: ${GitRepoURL}"
             git clone ${GitRepoURL} /opt/football/app
             chown -R ec2-user:ec2-user /opt/football/app
+
+            # Copy .env file to app directory
+            cd /opt/football/app
+            cp /opt/football/.env .
+            chown ec2-user:ec2-user .env
+
+            echo "Repository cloned. Deploy services after pushing Docker images to ECR."
+            echo "Run: ./scripts/deploy.sh"
           fi
 
           # ------------------------------------------------------------------
@@ -1049,11 +1047,11 @@ Outputs:
     Export:
       Name: !Sub ${AWS::StackName}-GoConsumerRepositoryUri
 
-  # GitHubActionsRoleArn:
-  #   Description: IAM Role ARN for GitHub Actions (use in workflow)
-  #   Value: !GetAtt GitHubActionsRole.Arn
-  #   Export:
-  #     Name: !Sub ${AWS::StackName}-GitHubActionsRoleArn
+  GitHubActionsRoleArn:
+    Description: IAM Role ARN for GitHub Actions (use in workflow)
+    Value: !GetAtt GitHubActionsRole.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-GitHubActionsRoleArn
 
   GitHubSecretsConfig:
     Description: GitHub repository secrets to configure
@@ -1062,7 +1060,7 @@ Outputs:
 
       AWS_REGION: ${AWS::Region}
       AWS_ACCOUNT_ID: ${AWS::AccountId}
-      AWS_ROLE_ARN: (Set up OIDC manually in IAM Console)
+      AWS_ROLE_ARN: ${GitHubActionsRole.Arn}
       ECR_REGISTRY: ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
       STACK_NAME: ${AWS::StackName}
       EC2_INSTANCE_ID: ${SwarmInstance}

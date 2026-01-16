@@ -37,6 +37,6 @@
   },
   {
     "ParameterKey": "GitRepoURL",
-    "ParameterValue": ""
+    "ParameterValue": "https://github.com/mabumusa1/football-simulator.git"
   }
 ]

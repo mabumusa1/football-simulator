@@ -324,7 +324,9 @@ func TestValidEventTypes(t *testing.T) {
 	expectedTypes := []EventType{
 		EventTypePass,
 		EventTypeShot,
+		EventTypeShotOnTarget,
 		EventTypeGoal,
+		EventTypeOwnGoal,
 		EventTypeFoul,
 		EventTypeYellowCard,
 		EventTypeRedCard,
@@ -332,7 +334,17 @@ func TestValidEventTypes(t *testing.T) {
 		EventTypeOffside,
 		EventTypeCorner,
 		EventTypeFreeKick,
+		EventTypePenalty,
+		EventTypePenaltySaved,
 		EventTypeInterception,
+		EventTypeTackle,
+		EventTypeSave,
+		EventTypeInjury,
+		EventTypeVARReview,
+		EventTypeKickoff,
+		EventTypeHalfTime,
+		EventTypeSecondHalf,
+		EventTypeFullTime,
 	}
 
 	for _, et := range expectedTypes {
@@ -1094,7 +1106,7 @@ func TestEventType_Constants(t *testing.T) {
 
 // TestValidEventTypes_Completeness ensures ValidEventTypes map matches constants
 func TestValidEventTypes_Completeness(t *testing.T) {
-	expectedCount := 11 // Total number of event types
+	expectedCount := 23 // Total number of event types
 
 	if len(ValidEventTypes) != expectedCount {
 		t.Errorf("ValidEventTypes has %d entries, want %d", len(ValidEventTypes), expectedCount)
