@@ -87,7 +87,7 @@ jobs:
             go tool cover -func=coverage.out | tail -1 | awk '{print "COVERAGE=" $3}' >> $GITHUB_OUTPUT
 
       - name: Upload coverage artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: coverage-report
           path: coverage.out
