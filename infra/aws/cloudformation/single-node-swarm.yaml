@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: |
-  Single-node Docker Swarm deployment for Fanfinity Football Event Streaming Infrastructure.
+  Single-node Docker Swarm deployment for Football Event Streaming Infrastructure.
   Deploys: Go API, Go Consumer, Kafka, ClickHouse, Prometheus, Grafana, Traefik.
   Optimized for high throughput (10K+ events/min).
 
@@ -49,7 +49,7 @@ Parameters:
   # Domain Configuration
   Domain:
     Type: String
-    Description: Domain name for the application (e.g., fanfinity.example.com)
+    Description: Domain name for the application (e.g., football.example.com)
     AllowedPattern: ^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]\.[a-zA-Z]{2,}$
     ConstraintDescription: Must be a valid domain name
 
@@ -247,7 +247,7 @@ Resources:
           FromPort: 80
           ToPort: 80
           CidrIp: 0.0.0.0/0
-          Description: HTTP for Let's Encrypt ACME challenge
+          Description: HTTP for LetsEncrypt ACME challenge
         # HTTPS (main application traffic via Traefik)
         - IpProtocol: tcp
           FromPort: 443
@@ -460,71 +460,73 @@ Resources:
 
   # ---------------------------------------------------------------------------
   # GITHUB ACTIONS OIDC (Secure CI/CD without access keys)
+  # NOTE: Commented out - AWS::IAM::OIDCIdentityProvider not available
+  # Set up GitHub OIDC manually via AWS Console after stack creation
   # ---------------------------------------------------------------------------
-  GitHubOIDCProvider:
-    Type: AWS::IAM::OIDCIdentityProvider
-    Properties:
-      Url: https://token.actions.githubusercontent.com
-      ClientIdList:
-        - sts.amazonaws.com
-      ThumbprintList:
-        - 6938fd4d98bab03faadb97b34396831e3780aea1
-        - 1c58a3a8518e8759bf075b76b750d4f2df264fcd
-      Tags:
-        - Key: Name
-          Value: !Sub ${AWS::StackName}-github-oidc
-
-  GitHubActionsRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: !Sub ${AWS::StackName}-github-actions
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Federated: !Ref GitHubOIDCProvider
-            Action: sts:AssumeRoleWithWebIdentity
-            Condition:
-              StringLike:
-                token.actions.githubusercontent.com:sub: !Sub repo:*:*
-              StringEquals:
-                token.actions.githubusercontent.com:aud: sts.amazonaws.com
-      Policies:
-        - PolicyName: ECRPushPolicy
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - ecr:GetAuthorizationToken
-                Resource: '*'
-              - Effect: Allow
-                Action:
-                  - ecr:BatchCheckLayerAvailability
-                  - ecr:GetDownloadUrlForLayer
-                  - ecr:BatchGetImage
-                  - ecr:PutImage
-                  - ecr:InitiateLayerUpload
-                  - ecr:UploadLayerPart
-                  - ecr:CompleteLayerUpload
-                Resource:
-                  - !GetAtt GoApiRepository.Arn
-                  - !GetAtt GoConsumerRepository.Arn
-        - PolicyName: SSMDeployPolicy
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - ssm:SendCommand
-                  - ssm:GetCommandInvocation
-                Resource:
-                  - !Sub arn:aws:ssm:${AWS::Region}::document/AWS-RunShellScript
-                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/${SwarmInstance}
-      Tags:
-        - Key: Name
-          Value: !Sub ${AWS::StackName}-github-actions-role
+  # GitHubOIDCProvider:
+  #   Type: AWS::IAM::OIDCIdentityProvider
+  #   Properties:
+  #     Url: https://token.actions.githubusercontent.com
+  #     ClientIdList:
+  #       - sts.amazonaws.com
+  #     ThumbprintList:
+  #       - 6938fd4d98bab03faadb97b34396831e3780aea1
+  #       - 1c58a3a8518e8759bf075b76b750d4f2df264fcd
+  #     Tags:
+  #       - Key: Name
+  #         Value: !Sub ${AWS::StackName}-github-oidc
+  #
+  # GitHubActionsRole:
+  #   Type: AWS::IAM::Role
+  #   Properties:
+  #     RoleName: !Sub ${AWS::StackName}-github-actions
+  #     AssumeRolePolicyDocument:
+  #       Version: '2012-10-17'
+  #       Statement:
+  #         - Effect: Allow
+  #           Principal:
+  #             Federated: !Ref GitHubOIDCProvider
+  #           Action: sts:AssumeRoleWithWebIdentity
+  #           Condition:
+  #             StringLike:
+  #               token.actions.githubusercontent.com:sub: !Sub repo:*:*
+  #             StringEquals:
+  #               token.actions.githubusercontent.com:aud: sts.amazonaws.com
+  #     Policies:
+  #       - PolicyName: ECRPushPolicy
+  #         PolicyDocument:
+  #           Version: '2012-10-17'
+  #           Statement:
+  #             - Effect: Allow
+  #               Action:
+  #                 - ecr:GetAuthorizationToken
+  #               Resource: '*'
+  #             - Effect: Allow
+  #               Action:
+  #                 - ecr:BatchCheckLayerAvailability
+  #                 - ecr:GetDownloadUrlForLayer
+  #                 - ecr:BatchGetImage
+  #                 - ecr:PutImage
+  #                 - ecr:InitiateLayerUpload
+  #                 - ecr:UploadLayerPart
+  #                 - ecr:CompleteLayerUpload
+  #               Resource:
+  #                 - !GetAtt GoApiRepository.Arn
+  #                 - !GetAtt GoConsumerRepository.Arn
+  #       - PolicyName: SSMDeployPolicy
+  #         PolicyDocument:
+  #           Version: '2012-10-17'
+  #           Statement:
+  #             - Effect: Allow
+  #               Action:
+  #                 - ssm:SendCommand
+  #                 - ssm:GetCommandInvocation
+  #               Resource:
+  #                 - !Sub arn:aws:ssm:${AWS::Region}::document/AWS-RunShellScript
+  #                 - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/${SwarmInstance}
+  #     Tags:
+  #       - Key: Name
+  #         Value: !Sub ${AWS::StackName}-github-actions-role
 
   # ---------------------------------------------------------------------------
   # EC2 INSTANCE
@@ -548,7 +550,8 @@ Resources:
             VolumeSize: !Ref EBSVolumeSize
             VolumeType: gp3
             Iops: !Ref EBSVolumeIOPS
-            Throughput: !Ref EBSThroughput
+            # Throughput removed - not supported in CloudFormation BlockDeviceMapping
+            # gp3 defaults to 125 MiB/s, can be modified after instance creation
             DeleteOnTermination: true
             Encrypted: true
       UserData:
@@ -556,7 +559,7 @@ Resources:
           #!/bin/bash -xe
 
           # =================================================================
-          # USER DATA SCRIPT - Docker Swarm Setup for Fanfinity Infrastructure
+          # USER DATA SCRIPT - Docker Swarm Setup for Football Infrastructure
           # =================================================================
 
           # Log all output to file and console
@@ -743,9 +746,9 @@ Resources:
           # ------------------------------------------------------------------
           echo "[7/8] Setting up application directory..."
 
-          mkdir -p /opt/fanfinity
-          chown ec2-user:ec2-user /opt/fanfinity
-          cd /opt/fanfinity
+          mkdir -p /opt/football
+          chown ec2-user:ec2-user /opt/football
+          cd /opt/football
 
           # Generate secure random passwords
           CLICKHOUSE_PASS=$(openssl rand -hex 16)
@@ -759,9 +762,9 @@ Resources:
           PROMETHEUS_AUTH="admin:$(openssl passwd -apr1 $PROMETHEUS_PASS | sed 's/\$/\$\$/g')"
 
           # Create .env file with all required variables
-          cat > /opt/fanfinity/.env << ENVFILE
+          cat > /opt/football/.env << ENVFILE
           # =============================================================================
-          # Fanfinity Infrastructure - Generated Environment Variables
+          # Football Infrastructure - Generated Environment Variables
           # Generated: $(date)
           # Stack: ${AWS::StackName}
           # =============================================================================
@@ -848,13 +851,13 @@ Resources:
           K6_PROMETHEUS_RW_SERVER_URL=http://prometheus:9090/api/v1/write
           ENVFILE
 
-          chown ec2-user:ec2-user /opt/fanfinity/.env
-          chmod 600 /opt/fanfinity/.env
+          chown ec2-user:ec2-user /opt/football/.env
+          chmod 600 /opt/football/.env
 
           # Save credentials to a separate file for easy reference
-          cat > /opt/fanfinity/credentials.txt << CREDS
+          cat > /opt/football/credentials.txt << CREDS
           =============================================================================
-          Fanfinity Infrastructure - Generated Credentials
+          Football Infrastructure - Generated Credentials
           Generated: $(date)
           =============================================================================
 
@@ -887,16 +890,16 @@ Resources:
           =============================================================================
           CREDS
 
-          chown ec2-user:ec2-user /opt/fanfinity/credentials.txt
-          chmod 600 /opt/fanfinity/credentials.txt
+          chown ec2-user:ec2-user /opt/football/credentials.txt
+          chmod 600 /opt/football/credentials.txt
 
           # ------------------------------------------------------------------
           # CLONE REPOSITORY (if URL provided)
           # ------------------------------------------------------------------
           if [ -n "${GitRepoURL}" ]; then
             echo "Cloning repository: ${GitRepoURL}"
-            git clone ${GitRepoURL} /opt/fanfinity/app
-            chown -R ec2-user:ec2-user /opt/fanfinity/app
+            git clone ${GitRepoURL} /opt/football/app
+            chown -R ec2-user:ec2-user /opt/football/app
           fi
 
           # ------------------------------------------------------------------
@@ -922,15 +925,15 @@ Resources:
           echo "   - traefik.${Domain}"
           echo ""
           echo "2. Clone your repository (if not auto-cloned):"
-          echo "   cd /opt/fanfinity && git clone <repo-url> app"
+          echo "   cd /opt/football && git clone <repo-url> app"
           echo ""
           echo "3. Copy .env file and deploy:"
-          echo "   cd /opt/fanfinity/app"
-          echo "   cp /opt/fanfinity/.env ."
+          echo "   cd /opt/football/app"
+          echo "   cp /opt/football/.env ."
           echo "   ./scripts/deploy.sh"
           echo ""
           echo "4. View generated credentials:"
-          echo "   cat /opt/fanfinity/credentials.txt"
+          echo "   cat /opt/football/credentials.txt"
           echo ""
           docker info | grep -A 10 "Swarm:"
 
@@ -940,7 +943,7 @@ Resources:
         - Key: Environment
           Value: !Ref Environment
         - Key: Application
-          Value: fanfinity
+          Value: football
     CreationPolicy:
       ResourceSignal:
         Count: 1
@@ -1007,17 +1010,17 @@ Outputs:
 
   CredentialsLocation:
     Description: Location of generated credentials on the instance
-    Value: /opt/fanfinity/credentials.txt
+    Value: /opt/football/credentials.txt
 
   DeploymentInstructions:
     Description: Next steps after stack creation
     Value: !Sub |
       1. Create DNS A records (see DNSRecords output)
       2. SSH into the instance: ssh -i ${KeyPairName}.pem ec2-user@${ElasticIP}
-      3. Clone your repository: cd /opt/fanfinity && git clone <repo-url> app
-      4. Copy environment file: cp /opt/fanfinity/.env app/.env
+      3. Clone your repository: cd /opt/football && git clone <repo-url> app
+      4. Copy environment file: cp /opt/football/.env app/.env
       5. Deploy services: cd app && ./scripts/deploy.sh
-      6. View credentials: cat /opt/fanfinity/credentials.txt
+      6. View credentials: cat /opt/football/credentials.txt
 
   CloudWatchLogs:
     Description: CloudWatch Log Groups for monitoring
@@ -1046,11 +1049,11 @@ Outputs:
     Export:
       Name: !Sub ${AWS::StackName}-GoConsumerRepositoryUri
 
-  GitHubActionsRoleArn:
-    Description: IAM Role ARN for GitHub Actions (use in workflow)
-    Value: !GetAtt GitHubActionsRole.Arn
-    Export:
-      Name: !Sub ${AWS::StackName}-GitHubActionsRoleArn
+  # GitHubActionsRoleArn:
+  #   Description: IAM Role ARN for GitHub Actions (use in workflow)
+  #   Value: !GetAtt GitHubActionsRole.Arn
+  #   Export:
+  #     Name: !Sub ${AWS::StackName}-GitHubActionsRoleArn
 
   GitHubSecretsConfig:
     Description: GitHub repository secrets to configure
@@ -1059,7 +1062,7 @@ Outputs:
 
       AWS_REGION: ${AWS::Region}
       AWS_ACCOUNT_ID: ${AWS::AccountId}
-      AWS_ROLE_ARN: ${GitHubActionsRole.Arn}
+      AWS_ROLE_ARN: (Set up OIDC manually in IAM Console)
       ECR_REGISTRY: ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
       STACK_NAME: ${AWS::StackName}
       EC2_INSTANCE_ID: ${SwarmInstance}

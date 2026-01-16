@@ -1,11 +1,11 @@
 [
   {
     "ParameterKey": "Domain",
-    "ParameterValue": "REPLACE_WITH_YOUR_DOMAIN"
+    "ParameterValue": "football.capibridge.com"
   },
   {
     "ParameterKey": "LetsEncryptEmail",
-    "ParameterValue": "REPLACE_WITH_YOUR_EMAIL"
+    "ParameterValue": "m.abumusa@gmail.com"
   },
   {
     "ParameterKey": "InstanceType",
@@ -13,7 +13,7 @@
   },
   {
     "ParameterKey": "KeyPairName",
-    "ParameterValue": "REPLACE_WITH_YOUR_KEYPAIR"
+    "ParameterValue": "football"
   },
   {
     "ParameterKey": "SSHAccessCIDR",

@@ -6,7 +6,7 @@ nav_order: 6
 
 # Development Setup
 
-Set up your local development environment for Fanfinity Infrastructure.
+Set up your local development environment for Football Infrastructure.
 
 ## Prerequisites
 
@@ -63,7 +63,7 @@ If you prefer not to use Dev Containers.
 ### 1. Start Infrastructure Services
 
 ```bash
-cd fanfinity-infrastructure
+cd football-infrastructure
 
 # Copy environment file
 cp .env.example .env
@@ -115,7 +115,7 @@ curl http://localhost:8080/ready
 ## Project Structure
 
 ```
-fanfinity-infrastructure/
+football-infrastructure/
 ├── .devcontainer/           # Dev container configuration
 │   ├── devcontainer.json    # VS Code dev container settings
 │   ├── Dockerfile           # Dev container image
@@ -260,13 +260,13 @@ Configuration is in `.golangci.yml` in each app directory.
 
 ```bash
 # Build API image
-docker build -f apps/api/Dockerfile -t fanfinity-api:dev .
+docker build -f apps/api/Dockerfile -t football-api:dev .
 
 # Build Consumer image
-docker build -f apps/consumer/Dockerfile -t fanfinity-consumer:dev .
+docker build -f apps/consumer/Dockerfile -t football-consumer:dev .
 
 # Test locally
-docker run -p 8080:8080 --env-file .env fanfinity-api:dev
+docker run -p 8080:8080 --env-file .env football-api:dev
 ```
 
 ## Environment Variables

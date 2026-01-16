@@ -6,7 +6,7 @@ nav_order: 4
 
 # API Reference
 
-Complete documentation for the Fanfinity API.
+Complete documentation for the Football API.
 
 ## Base URL
 

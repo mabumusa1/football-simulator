@@ -9,10 +9,6 @@
         <events>true</events>
         <asynchronous_metrics>true</asynchronous_metrics>
     </prometheus>
-    <max_memory_usage>3000000000</max_memory_usage>
-    <max_memory_usage_for_all_queries>2500000000</max_memory_usage_for_all_queries>
-    <max_query_size>1073741824</max_query_size>
-    <max_concurrent_queries>100</max_concurrent_queries>
     <logger>
         <level>information</level>
         <console>1</console>

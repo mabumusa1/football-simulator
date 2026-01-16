@@ -6,7 +6,7 @@ nav_order: 7
 
 # Load Testing
 
-Test Fanfinity Infrastructure with realistic football match simulations.
+Test Football Infrastructure with realistic football match simulations.
 
 ## Overview
 

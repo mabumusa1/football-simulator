@@ -4,13 +4,13 @@ title: Home
 nav_order: 1
 ---
 
-# Fanfinity Infrastructure
+# Football Infrastructure
 
 A high-performance, real-time football match event streaming and viewer engagement analytics platform designed to handle **100K+ concurrent viewers**.
 
 ## Overview
 
-Fanfinity Infrastructure ingests game events (goals, passes, fouls, etc.) and correlates them with viewer engagement data (reactions, comments, shares) to provide real-time analytics for sports streaming platforms.
+Football Infrastructure ingests game events (goals, passes, fouls, etc.) and correlates them with viewer engagement data (reactions, comments, shares) to provide real-time analytics for sports streaming platforms.
 
 ## Key Features
 
@@ -60,8 +60,8 @@ If you want to **run this code locally**:
 
 ```bash
 # Clone and open in VS Code with Dev Containers
-git clone https://github.com/mabumusa1/fanfinity-infrastructure.git
-cd fanfinity-infrastructure
+git clone https://github.com/mabumusa1/football-infrastructure.git
+cd football-infrastructure
 code .
 # Click "Reopen in Container" when prompted
 ```
@@ -91,7 +91,7 @@ See [API Reference](api-reference.md) for complete endpoint documentation.
 ## Repository Structure
 
 ```
-fanfinity-infrastructure/
+football-infrastructure/
 ├── apps/
 │   ├── api/          # Go REST API service
 │   └── consumer/     # Go Kafka consumer service

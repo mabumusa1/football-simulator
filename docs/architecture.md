@@ -6,7 +6,7 @@ nav_order: 3
 
 # Architecture
 
-Fanfinity Infrastructure is designed for high-throughput, real-time event processing with analytics capabilities.
+Football Infrastructure is designed for high-throughput, real-time event processing with analytics capabilities.
 
 ## System Overview
 
@@ -248,7 +248,7 @@ IAM Roles
 
 **Horizontal (add more nodes):**
 1. Add worker nodes to Swarm
-2. Scale API replicas: `docker service scale fanfinity_go-api=10`
+2. Scale API replicas: `docker service scale football_go-api=10`
 3. Scale consumer replicas for more Kafka partitions
 
 **Vertical (bigger instance):**

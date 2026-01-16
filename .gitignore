@@ -72,3 +72,5 @@ tests/load/*.csv
 # Local overrides (if any)
 docker-compose.override.yml
 *.local.yml
+keys.csv
+.mcp.json

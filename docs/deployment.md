@@ -6,7 +6,7 @@ nav_order: 5
 
 # Deployment Guide
 
-Deploy Fanfinity Infrastructure to production on AWS using Docker Swarm.
+Deploy Football Infrastructure to production on AWS using Docker Swarm.
 
 ## Overview
 
@@ -47,12 +47,12 @@ AWS Cloud
 ```bash
 # Create key pair
 aws ec2 create-key-pair \
-  --key-name fanfinity-key \
+  --key-name football-key \
   --query 'KeyMaterial' \
-  --output text > fanfinity-key.pem
+  --output text > football-key.pem
 
 # Secure the key
-chmod 400 fanfinity-key.pem
+chmod 400 football-key.pem
 ```
 
 ## Step 2: Configure Parameters
@@ -70,7 +70,7 @@ cp infra/aws/cloudformation/parameters/dev.json infra/aws/cloudformation/paramet
 [
   {
     "ParameterKey": "Domain",
-    "ParameterValue": "fanfinity.example.com"
+    "ParameterValue": "football.example.com"
   },
   {
     "ParameterKey": "LetsEncryptEmail",
@@ -78,7 +78,7 @@ cp infra/aws/cloudformation/parameters/dev.json infra/aws/cloudformation/paramet
   },
   {
     "ParameterKey": "KeyPairName",
-    "ParameterValue": "fanfinity-key"
+    "ParameterValue": "football-key"
   },
   {
     "ParameterKey": "InstanceType",
@@ -114,7 +114,7 @@ aws cloudformation validate-template \
 
 # Create stack
 aws cloudformation create-stack \
-  --stack-name fanfinity-prod \
+  --stack-name football-prod \
   --template-body file://infra/aws/cloudformation/single-node-swarm.yaml \
   --parameters file://infra/aws/cloudformation/parameters/prod.json \
   --capabilities CAPABILITY_NAMED_IAM \
@@ -122,12 +122,12 @@ aws cloudformation create-stack \
 
 # Wait for completion (10-15 minutes)
 aws cloudformation wait stack-create-complete \
-  --stack-name fanfinity-prod \
+  --stack-name football-prod \
   --region us-east-1
 
 # Get outputs
 aws cloudformation describe-stacks \
-  --stack-name fanfinity-prod \
+  --stack-name football-prod \
   --query 'Stacks[0].Outputs' \
   --output table
 ```
@@ -146,15 +146,15 @@ aws cloudformation describe-stacks \
 Create DNS A records pointing to the Elastic IP:
 
 ```
-api.fanfinity.example.com      → <Elastic IP>
-grafana.fanfinity.example.com  → <Elastic IP>
-prometheus.fanfinity.example.com → <Elastic IP>
-traefik.fanfinity.example.com  → <Elastic IP>
+api.football.example.com      → <Elastic IP>
+grafana.football.example.com  → <Elastic IP>
+prometheus.football.example.com → <Elastic IP>
+traefik.football.example.com  → <Elastic IP>
 ```
 
 Verify DNS propagation:
 ```bash
-dig api.fanfinity.example.com
+dig api.football.example.com
 ```
 
 ## Step 5: Configure GitHub Secrets
@@ -167,7 +167,7 @@ Add these secrets to your GitHub repository (Settings → Secrets → Actions):
 | `AWS_ACCOUNT_ID` | 123456789012 | CloudFormation output |
 | `AWS_ROLE_ARN` | arn:aws:iam::... | GitHubActionsRoleArn output |
 | `ECR_REGISTRY` | 123456789012.dkr.ecr... | ECRRegistry output |
-| `STACK_NAME` | fanfinity-prod | Your stack name |
+| `STACK_NAME` | football-prod | Your stack name |
 | `EC2_INSTANCE_ID` | i-0123456789abcdef0 | InstanceId output |
 | `SONAR_TOKEN` | sqa_... | From SonarCloud |
 
@@ -192,17 +192,17 @@ SSH into the instance and deploy:
 
 ```bash
 # SSH into instance
-ssh -i fanfinity-key.pem ec2-user@<elastic-ip>
+ssh -i football-key.pem ec2-user@<elastic-ip>
 
 # Navigate to app directory
-cd /opt/fanfinity
+cd /opt/football
 
 # Clone repository (if not auto-cloned)
-git clone https://github.com/your-org/fanfinity-infrastructure.git app
+git clone https://github.com/your-org/football-infrastructure.git app
 cd app
 
 # Copy environment file
-cp /opt/fanfinity/.env .
+cp /opt/football/.env .
 
 # Login to ECR
 aws ecr get-login-password --region us-east-1 | \
@@ -220,19 +220,19 @@ docker service ls
 
 # Expected output:
 # ID     NAME                    MODE         REPLICAS   IMAGE
-# xxx    fanfinity_traefik       replicated   1/1        traefik:3.6.7
-# xxx    fanfinity_kafka         replicated   1/1        apache/kafka:4.1.1
-# xxx    fanfinity_clickhouse    replicated   1/1        clickhouse/clickhouse-server:25...
-# xxx    fanfinity_go-api        replicated   3/3        <ecr>/go-api:latest
-# xxx    fanfinity_go-consumer   replicated   2/2        <ecr>/go-consumer:latest
-# xxx    fanfinity_prometheus    replicated   1/1        prom/prometheus:v3.9.1
-# xxx    fanfinity_grafana       replicated   1/1        grafana/grafana:12.4.0
+# xxx    football_traefik       replicated   1/1        traefik:3.6.7
+# xxx    football_kafka         replicated   1/1        apache/kafka:4.1.1
+# xxx    football_clickhouse    replicated   1/1        clickhouse/clickhouse-server:25...
+# xxx    football_go-api        replicated   3/3        <ecr>/go-api:latest
+# xxx    football_go-consumer   replicated   2/2        <ecr>/go-consumer:latest
+# xxx    football_prometheus    replicated   1/1        prom/prometheus:v3.9.1
+# xxx    football_grafana       replicated   1/1        grafana/grafana:12.4.0
 
 # Test API
-curl https://api.fanfinity.example.com/health
+curl https://api.football.example.com/health
 
 # Test with API key
-curl https://api.fanfinity.example.com/api/events \
+curl https://api.football.example.com/api/events \
   -H "X-API-Key: <your-api-key>" \
   -H "Content-Type: application/json" \
   -d '{"eventId":"test","matchId":"m1","eventType":"goal","timestamp":"2024-01-15T00:00:00Z","teamId":1}'
@@ -249,7 +249,7 @@ curl https://api.fanfinity.example.com/api/events \
 
 **Get credentials:**
 ```bash
-cat /opt/fanfinity/credentials.txt
+cat /opt/football/credentials.txt
 ```
 
 ## CI/CD Pipeline
@@ -276,16 +276,16 @@ The GitHub Actions pipeline (`.github/workflows/deploy.yml`) automates:
 
 ```bash
 # Scale up
-docker service scale fanfinity_go-api=5
+docker service scale football_go-api=5
 
 # Scale down
-docker service scale fanfinity_go-api=2
+docker service scale football_go-api=2
 ```
 
 ### Scale Consumer Service
 
 ```bash
-docker service scale fanfinity_go-consumer=4
+docker service scale football_go-consumer=4
 ```
 
 ### Add Worker Node
@@ -305,18 +305,18 @@ docker swarm join --token <worker-token> <manager-ip>:2377
 # Update go-api service
 docker service update \
   --image <ecr>/go-api:v1.1.0 \
-  fanfinity_go-api
+  football_go-api
 
 # Update go-consumer
 docker service update \
   --image <ecr>/go-consumer:v1.1.0 \
-  fanfinity_go-consumer
+  football_go-consumer
 ```
 
 ### Full Stack Redeploy
 
 ```bash
-cd /opt/fanfinity/app
+cd /opt/football/app
 git pull
 ./scripts/deploy.sh
 ```
@@ -327,15 +327,15 @@ git pull
 
 ```bash
 # API logs
-docker service logs fanfinity_go-api --tail 100 -f
+docker service logs football_go-api --tail 100 -f
 
 # Consumer logs
-docker service logs fanfinity_go-consumer --tail 100
+docker service logs football_go-consumer --tail 100
 
 # All services
-docker service logs fanfinity_kafka
-docker service logs fanfinity_clickhouse
-docker service logs fanfinity_traefik
+docker service logs football_kafka
+docker service logs football_clickhouse
+docker service logs football_traefik
 ```
 
 ### Grafana Dashboards
@@ -350,8 +350,8 @@ docker service logs fanfinity_traefik
 ### CloudWatch Logs
 
 Logs are also available in CloudWatch:
-- `/fanfinity-prod/user-data` - EC2 setup logs
-- `/fanfinity-prod/docker` - Docker/service logs
+- `/football-prod/user-data` - EC2 setup logs
+- `/football-prod/docker` - Docker/service logs
 
 ## Backup & Recovery
 
@@ -383,7 +383,7 @@ docker run --rm -v prometheus-data:/data -v /backup:/backup alpine \
 
 ```bash
 # Check Traefik logs
-docker service logs fanfinity_traefik
+docker service logs football_traefik
 
 # Verify DNS
 dig api.your-domain.com
@@ -396,13 +396,13 @@ echo | openssl s_client -connect api.your-domain.com:443 2>/dev/null | openssl x
 
 ```bash
 # Check service status
-docker service ps fanfinity_go-api --no-trunc
+docker service ps football_go-api --no-trunc
 
 # View task errors
-docker service inspect fanfinity_go-api
+docker service inspect football_go-api
 
 # Force update
-docker service update --force fanfinity_go-api
+docker service update --force football_go-api
 ```
 
 ### High Memory Usage
@@ -423,7 +423,7 @@ docker exec $(docker ps -q -f name=clickhouse) \
 
 ```bash
 # Check Kafka logs
-docker service logs fanfinity_kafka
+docker service logs football_kafka
 
 # List topics
 docker exec $(docker ps -q -f name=kafka) \

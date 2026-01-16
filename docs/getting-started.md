@@ -6,7 +6,7 @@ nav_order: 2
 
 # Getting Started
 
-Get Fanfinity Infrastructure running in under 5 minutes.
+Get Football Infrastructure running in under 5 minutes.
 
 ## Prerequisites
 
@@ -20,8 +20,8 @@ The fastest way to get started is using VS Code Dev Containers:
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/mabumusa1/fanfinity-infrastructure.git
-cd fanfinity-infrastructure
+git clone https://github.com/mabumusa1/football-infrastructure.git
+cd football-infrastructure
 
 # 2. Open in VS Code
 code .
@@ -42,8 +42,8 @@ If you prefer not to use Dev Containers:
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/mabumusa1/fanfinity-infrastructure.git
-cd fanfinity-infrastructure
+git clone https://github.com/mabumusa1/football-infrastructure.git
+cd football-infrastructure
 
 # 2. Copy environment file
 cp .env.example .env

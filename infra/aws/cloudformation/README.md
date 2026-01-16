@@ -1,6 +1,6 @@
 # AWS CloudFormation Deployment
 
-This directory contains CloudFormation templates for deploying the Fanfinity Football Event Streaming Infrastructure to AWS EC2 with Docker Swarm.
+This directory contains CloudFormation templates for deploying the Football Football Event Streaming Infrastructure to AWS EC2 with Docker Swarm.
 
 ## Architecture
 
@@ -56,11 +56,11 @@ This directory contains CloudFormation templates for deploying the Fanfinity Foo
 ```bash
 # Create key pair and save private key
 aws ec2 create-key-pair \
-  --key-name fanfinity-key \
+  --key-name football-key \
   --query 'KeyMaterial' \
-  --output text > fanfinity-key.pem
+  --output text > football-key.pem
 
-chmod 400 fanfinity-key.pem
+chmod 400 football-key.pem
 ```
 
 ### 2. Update Parameters
@@ -78,7 +78,7 @@ Edit `parameters/dev.json` and replace placeholder values:
 },
 {
   "ParameterKey": "KeyPairName",
-  "ParameterValue": "fanfinity-key"         // Your key pair name
+  "ParameterValue": "football-key"         // Your key pair name
 }
 ```
 
@@ -91,7 +91,7 @@ aws cloudformation validate-template \
 
 # Create stack
 aws cloudformation create-stack \
-  --stack-name fanfinity-dev \
+  --stack-name football-dev \
   --template-body file://single-node-swarm.yaml \
   --parameters file://parameters/dev.json \
   --capabilities CAPABILITY_NAMED_IAM \
@@ -99,12 +99,12 @@ aws cloudformation create-stack \
 
 # Wait for completion (takes ~10-15 minutes)
 aws cloudformation wait stack-create-complete \
-  --stack-name fanfinity-dev \
+  --stack-name football-dev \
   --region us-east-1
 
 # Get outputs
 aws cloudformation describe-stacks \
-  --stack-name fanfinity-dev \
+  --stack-name football-dev \
   --query 'Stacks[0].Outputs' \
   --output table
 ```
@@ -130,7 +130,7 @@ Add these secrets to your GitHub repository (Settings > Secrets > Actions):
 | `AWS_ACCOUNT_ID` | Your AWS account ID |
 | `AWS_ROLE_ARN` | `GitHubActionsRoleArn` output |
 | `ECR_REGISTRY` | `ECRRegistry` output |
-| `STACK_NAME` | `fanfinity-dev` |
+| `STACK_NAME` | `football-dev` |
 | `EC2_INSTANCE_ID` | `InstanceId` output |
 
 ### 6. Deploy Application
@@ -139,21 +139,21 @@ SSH into the instance and deploy:
 
 ```bash
 # SSH into instance
-ssh -i fanfinity-key.pem ec2-user@<elastic-ip>
+ssh -i football-key.pem ec2-user@<elastic-ip>
 
 # Clone repository
-cd /opt/fanfinity
-git clone https://github.com/YOUR_USERNAME/fanfinity-infrastructure.git app
+cd /opt/football
+git clone https://github.com/YOUR_USERNAME/football-infrastructure.git app
 cd app
 
 # Copy generated environment file
-cp /opt/fanfinity/.env .
+cp /opt/football/.env .
 
 # Deploy all services
 ./scripts/deploy.sh
 
 # View generated credentials
-cat /opt/fanfinity/credentials.txt
+cat /opt/football/credentials.txt
 ```
 
 ## CI/CD Pipeline
@@ -227,20 +227,20 @@ This triggers the full pipeline: build → push → deploy → release.
 
 ```bash
 # View stack status
-aws cloudformation describe-stacks --stack-name fanfinity-dev
+aws cloudformation describe-stacks --stack-name football-dev
 
 # View stack events (for debugging)
-aws cloudformation describe-stack-events --stack-name fanfinity-dev
+aws cloudformation describe-stack-events --stack-name football-dev
 
 # Update stack
 aws cloudformation update-stack \
-  --stack-name fanfinity-dev \
+  --stack-name football-dev \
   --template-body file://single-node-swarm.yaml \
   --parameters file://parameters/dev.json \
   --capabilities CAPABILITY_NAMED_IAM
 
 # Delete stack
-aws cloudformation delete-stack --stack-name fanfinity-dev
+aws cloudformation delete-stack --stack-name football-dev
 
 # Connect via SSM (no SSH key needed)
 aws ssm start-session --target <instance-id>
@@ -249,7 +249,7 @@ aws ssm start-session --target <instance-id>
 ssh -i key.pem ec2-user@<ip> "docker service ls"
 
 # View service logs
-ssh -i key.pem ec2-user@<ip> "docker service logs fanfinity_go-api"
+ssh -i key.pem ec2-user@<ip> "docker service logs football_go-api"
 ```
 
 ## Troubleshooting
@@ -257,8 +257,8 @@ ssh -i key.pem ec2-user@<ip> "docker service logs fanfinity_go-api"
 ### Stack creation fails
 
 Check CloudWatch Logs:
-- `/fanfinity-dev/user-data` - Instance setup logs
-- `/fanfinity-dev/docker` - Docker logs
+- `/football-dev/user-data` - Instance setup logs
+- `/football-dev/docker` - Docker logs
 
 Or view user-data output on instance:
 ```bash
@@ -270,10 +270,10 @@ cat /var/log/user-data.log
 ```bash
 # Check service status
 docker service ls
-docker service ps fanfinity_go-api
+docker service ps football_go-api
 
 # View service logs
-docker service logs fanfinity_go-api --tail 100
+docker service logs football_go-api --tail 100
 ```
 
 ### SSL certificate issues

@@ -1,5 +1,5 @@
 # =============================================================================
-# GitHub Actions CI/CD Pipeline for Fanfinity Infrastructure
+# GitHub Actions CI/CD Pipeline for Football Infrastructure
 # =============================================================================
 # This workflow builds, tags, and deploys the Go services to AWS EC2.
 #
@@ -203,7 +203,7 @@ jobs:
             --instance-ids "${INSTANCE_ID}" \
             --document-name "AWS-RunShellScript" \
             --parameters commands="[
-              \"cd /opt/fanfinity/app\",
+              \"cd /opt/football/app\",
               \"echo 'Pulling latest code...'\",
               \"git pull origin main\",
               \"echo 'Updating VERSION in .env...'\",
