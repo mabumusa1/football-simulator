@@ -61,7 +61,7 @@ jobs:
 
             echo ""
             echo "=== Building API ==="
-            go build -o /tmp/api .
+            cd /workspace/apps/api && go build -o /tmp/api .
 
             echo ""
             echo "=== Building Consumer ==="
