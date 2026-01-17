@@ -2,7 +2,10 @@ package kafka
 
 import (
 	"context"
+	"fmt"
+	"net"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -82,18 +85,89 @@ func createTestEvent() *domain.Event {
 	}
 }
 
-// ensureTestTopic triggers topic auto-creation before tests write to it.
+// ensureTestTopic explicitly creates a topic and verifies it's ready by doing a test write.
 // This is needed because kafka-go's Writer alone doesn't reliably trigger
 // topic creation on the broker.
 func ensureTestTopic(t *testing.T, topic string) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	conn, err := kafka.DialLeader(ctx, "tcp", getKafkaBroker(), topic, 0)
+
+	broker := getKafkaBroker()
+
+	// Connect to Kafka broker to get controller info
+	conn, err := kafka.DialContext(ctx, "tcp", broker)
 	if err != nil {
-		t.Fatalf("failed to ensure topic %s exists: %v", topic, err)
+		t.Fatalf("failed to connect to Kafka: %v", err)
+	}
+
+	// Get the controller broker
+	controller, err := conn.Controller()
+	if err != nil {
+		_ = conn.Close()
+		t.Fatalf("failed to get controller: %v", err)
 	}
 	_ = conn.Close()
+
+	// Connect to the controller for topic creation
+	controllerAddr := net.JoinHostPort(controller.Host, fmt.Sprintf("%d", controller.Port))
+	controllerConn, err := kafka.DialContext(ctx, "tcp", controllerAddr)
+	if err != nil {
+		t.Fatalf("failed to connect to controller at %s: %v", controllerAddr, err)
+	}
+	defer func() { _ = controllerConn.Close() }()
+
+	// Create topic with explicit configuration
+	topicConfigs := []kafka.TopicConfig{
+		{
+			Topic:             topic,
+			NumPartitions:     1,
+			ReplicationFactor: 1,
+		},
+	}
+
+	err = controllerConn.CreateTopics(topicConfigs...)
+	if err != nil {
+		// Topic might already exist, which is fine - check for known error messages
+		errStr := err.Error()
+		if !strings.Contains(errStr, "Already Exists") &&
+			!strings.Contains(errStr, "already exists") {
+			// Log but don't fail - topic auto-creation might handle it
+			t.Logf("warning: CreateTopics for %s returned: %v", topic, err)
+		}
+	}
+
+	// Verify topic is fully operational by doing a test write with retries
+	writer := &kafka.Writer{
+		Addr:                   kafka.TCP(broker),
+		Topic:                  topic,
+		Balancer:               &kafka.LeastBytes{},
+		BatchSize:              1,
+		BatchTimeout:           time.Millisecond,
+		WriteTimeout:           10 * time.Second,
+		RequiredAcks:           kafka.RequireOne,
+		AllowAutoTopicCreation: true,
+	}
+	defer func() { _ = writer.Close() }()
+
+	testMsg := kafka.Message{
+		Key:   []byte("test-key"),
+		Value: []byte("test-value"),
+	}
+
+	// Retry writing until successful or timeout
+	for i := 0; i < 30; i++ {
+		err = writer.WriteMessages(ctx, testMsg)
+		if err == nil {
+			return // Topic is ready and writable
+		}
+		if !strings.Contains(err.Error(), "Unknown Topic Or Partition") {
+			t.Fatalf("unexpected error writing to topic %s: %v", topic, err)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	t.Fatalf("topic %s was not writable after creation: %v", topic, err)
 }
 
 // =============================================================================
