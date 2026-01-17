@@ -47,7 +47,7 @@
   },
 
   "onCreateCommand": "/usr/local/go/bin/go install -v golang.org/x/tools/gopls@latest",
-  "postCreateCommand": "go mod download 2>/dev/null || echo 'No go.mod yet'",
+  "postCreateCommand": "go mod download 2>/dev/null || echo 'No go.mod yet' && pre-commit install",
   "postStartCommand": "bash /workspace/.devcontainer/health-check.sh",
 
   "remoteEnv": {

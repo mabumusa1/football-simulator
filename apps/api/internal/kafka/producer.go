@@ -483,7 +483,7 @@ func NewEngagementWriter(brokers []string, topic string) *kafka.Writer {
 		Addr:         kafka.TCP(brokers...),
 		Topic:        topic,
 		Balancer:     &kafka.Hash{},
-		BatchSize:    500,            // Higher batch size for engagement volume
+		BatchSize:    500, // Higher batch size for engagement volume
 		BatchTimeout: 50 * time.Millisecond,
 		WriteTimeout: 10 * time.Second,
 		RequiredAcks: kafka.RequireOne, // Lower durability for high-volume engagement

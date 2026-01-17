@@ -260,23 +260,23 @@ func (e *EngagementEvent) ToKafkaMessage() ([]byte, error) {
 
 // EngagementMetrics represents aggregated engagement metrics for a match.
 type EngagementMetrics struct {
-	MatchID              string                        `json:"matchId"`
-	TotalEngagements     int64                         `json:"totalEngagements"`
-	UniqueUsers          int64                         `json:"uniqueUsers"`
-	EngagementsByType    map[string]int64              `json:"engagementsByType"`
-	EngagementsBySubtype map[string]map[string]int64   `json:"engagementsBySubtype"`
-	DeviceBreakdown      map[string]int64              `json:"deviceBreakdown"`
-	PlatformBreakdown    map[string]int64              `json:"platformBreakdown"`
-	CountryBreakdown     map[string]int64              `json:"countryBreakdown"`
-	PeakEngagement       *PeakEngagementMinute         `json:"peakEngagement,omitempty"`
-	EngagementTimeline   []EngagementTimelinePoint     `json:"engagementTimeline,omitempty"`
+	MatchID              string                      `json:"matchId"`
+	TotalEngagements     int64                       `json:"totalEngagements"`
+	UniqueUsers          int64                       `json:"uniqueUsers"`
+	EngagementsByType    map[string]int64            `json:"engagementsByType"`
+	EngagementsBySubtype map[string]map[string]int64 `json:"engagementsBySubtype"`
+	DeviceBreakdown      map[string]int64            `json:"deviceBreakdown"`
+	PlatformBreakdown    map[string]int64            `json:"platformBreakdown"`
+	CountryBreakdown     map[string]int64            `json:"countryBreakdown"`
+	PeakEngagement       *PeakEngagementMinute       `json:"peakEngagement,omitempty"`
+	EngagementTimeline   []EngagementTimelinePoint   `json:"engagementTimeline,omitempty"`
 }
 
 // PeakEngagementMinute represents the minute with highest engagement.
 type PeakEngagementMinute struct {
-	GameMinute       int   `json:"gameMinute"`
-	EngagementCount  int64 `json:"engagementCount"`
-	UniqueUsers      int64 `json:"uniqueUsers"`
+	GameMinute      int   `json:"gameMinute"`
+	EngagementCount int64 `json:"engagementCount"`
+	UniqueUsers     int64 `json:"uniqueUsers"`
 }
 
 // EngagementTimelinePoint represents engagements at a specific game minute.

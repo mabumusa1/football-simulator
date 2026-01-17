@@ -1,395 +1,313 @@
 ---
 layout: default
 title: Load Testing
-nav_order: 7
+nav_order: 8
 ---
 
 # Load Testing
 
-Test Football Infrastructure with realistic football match simulations.
+Simulate football matches with 100K+ concurrent viewers to test system performance.
 
 ## Overview
 
-The load testing suite simulates real football matches with:
-- **100K+ concurrent viewers**
-- **Realistic engagement patterns** (reactions spike on goals)
-- **10K+ events per minute**
-- **Real team rosters** (Al-Hilal vs Al-Nassr)
+The load testing tools simulate two types of events:
 
-## Prerequisites
+### Game Events (on the field)
+- `pass`, `shot`, `goal`, `foul`, `yellow_card`, `red_card`
+- `corner`, `free_kick`, `penalty`, `offside`, `substitution`
+- `interception`, `tackle`, `save`, `var_review`
 
-```bash
-cd tests/load
+### Engagement Events (viewer reactions)
+- **Reactions**: cheers, boos, emoji reactions
+- **Comments**: match commentary, player discussions
+- **Video Actions**: pause, rewind, replay, camera switch
+- **Shares**: Twitter, Facebook, WhatsApp, in-app
+- **Predictions**: score predictions, polls, player ratings
+- **Clicks**: stats views, player profiles, merchandise
 
-# Create Python virtual environment
-python3 -m venv venv
-source venv/bin/activate
+---
 
-# Install dependencies
-pip install -r requirements.txt
-```
+## Key Concept: Engagement Correlation
+
+Viewer engagement correlates with game events. A goal triggers 15x more reactions than baseline activity:
+
+| Game Event | Engagement Multiplier |
+|------------|----------------------|
+| Goal | 15x baseline |
+| Own Goal | 12x baseline |
+| Red Card | 10x baseline |
+| Penalty | 8x baseline |
+| VAR Review | 6x baseline |
+| Shot on Target | 4x baseline |
+| Yellow Card | 2.5x baseline |
+
+---
+
+## Viewer Personas
+
+The simulation models different viewer behavior patterns:
+
+| Persona | Distribution | Characteristics |
+|---------|-------------|-----------------|
+| Casual Viewer | 55% | Low engagement, occasional reactions |
+| Active Fan | 25% | High engagement, reactions + comments |
+| Social Sharer | 10% | Frequent sharing, captures moments |
+| Stats Enthusiast | 7% | High stats clicks, predictions |
+| Bettor | 3% | Very reactive to game-changing moments |
+
+---
 
 ## Quick Start
 
-```bash
-# Quick test (1,000 viewers, 5 minutes)
-python match_simulator.py \
-  --api-url http://localhost:8080 \
-  --api-key your-api-key \
-  --viewers 1000 \
-  --duration 5
+### 1. Set Up Python Environment
 
-# Full test (100,000 viewers, 90 minutes)
-python match_simulator.py \
-  --api-url http://localhost:8080 \
-  --api-key your-api-key \
-  --viewers 100000 \
-  --duration 90
+```bash
+cd tests/load
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
 ```
 
-## Available Simulators
+### 2. Configure API
 
-### 1. Combined Match Simulator
+```bash
+export API_URL="http://localhost:8080"
+export API_KEY="your-api-key"
+```
 
-**File:** `match_simulator.py`
+### 3. Run Simulation
 
-Simulates a complete football match with game events and viewer engagement.
+```bash
+# Quick test (1,000 viewers, 5 minutes)
+python match_simulator.py --viewers 1000 --duration 5
+
+# Full simulation (100K viewers, 90 minutes)
+python match_simulator.py --viewers 100000 --duration 90
+```
+
+---
+
+## Scripts
+
+### `match_simulator.py` - Full Match Simulation
+
+Simulates a complete match with game events and viewer engagement.
 
 ```bash
 python match_simulator.py \
-  --api-url http://localhost:8080 \
-  --api-key your-api-key \
-  --match-id "match_$(date +%Y%m%d_%H%M%S)" \
+  --match-id "match_abc123" \
+  --api-url "http://localhost:8080" \
+  --api-key "your-api-key" \
   --viewers 100000 \
   --duration 90 \
   --batch-size 500 \
   --concurrency 50
 ```
 
-**Parameters:**
+**Options:**
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `--api-url` | http://localhost:8080 | API endpoint |
-| `--api-key` | (required) | API authentication key |
-| `--match-id` | auto-generated | Unique match identifier |
-| `--viewers` | 100000 | Number of concurrent viewers |
-| `--duration` | 90 | Match duration in minutes |
-| `--batch-size` | 500 | Events per batch request |
-| `--concurrency` | 50 | Concurrent HTTP connections |
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--match-id` | Auto-generated | Match identifier |
+| `--api-url` | `http://localhost:8080` | API base URL |
+| `--api-key` | From env `API_KEY` | API authentication key |
+| `--viewers` | `100000` | Number of concurrent viewers |
+| `--duration` | `90` | Match duration in minutes |
+| `--batch-size` | `500` | Engagement events per batch |
+| `--concurrency` | `50` | Concurrent HTTP requests |
 
-### 2. Game Events Only
+### `simulate_match.py` - Game Events Only
 
-**File:** `simulate_match.py`
-
-Simulates only game events (goals, passes, fouls, etc.).
+Simulates only game events (no viewer engagement).
 
 ```bash
-python simulate_match.py \
-  --api-url http://localhost:8080 \
-  --api-key your-api-key \
-  --match-id "match_001"
+python simulate_match.py
 ```
 
-### 3. Engagement Events Only
+### `viewer_simulator.py` - Engagement Only
 
-**File:** `viewer_simulator.py`
-
-Simulates viewer engagement without game events.
+Simulates only viewer engagement events.
 
 ```bash
 python viewer_simulator.py \
-  --api-url http://localhost:8080 \
-  --api-key your-api-key \
-  --match-id "match_001" \
+  --match-id "match_123" \
   --viewers 100000 \
   --duration 90
 ```
 
-## Engagement Correlation
+---
 
-The simulator realistically correlates viewer engagement with game events:
+## VS Code Tasks
 
-| Game Event | Engagement Multiplier |
-|------------|----------------------|
-| Goal | 15x baseline |
-| Red Card | 10x baseline |
-| Penalty | 8x baseline |
-| VAR Review | 6x baseline |
-| Yellow Card | 4x baseline |
-| Shot on Target | 3x baseline |
-| Corner | 2x baseline |
-| Normal play | 1x baseline |
+Pre-configured tasks for load testing:
 
-**Example:** During a goal, if baseline is 100 engagements/second, expect ~1,500 engagements/second.
+| Task | Description |
+|------|-------------|
+| Load Test Setup | Create Python virtual environment |
+| Load Test (1K) | Quick test with 1,000 viewers |
+| Load Test (100K) | Full test with 100,000 viewers |
 
-## Viewer Personas
+Run via Command Palette: `Tasks: Run Task`
 
-The simulator models different viewer types:
+---
 
-| Persona | % of Viewers | Characteristics |
-|---------|--------------|-----------------|
-| Casual | 40% | Low engagement, mobile, short sessions |
-| Regular | 35% | Moderate engagement, reactions + comments |
-| Superfan | 15% | High engagement, all features, long sessions |
-| Analyst | 10% | Stats-focused, desktop, predictions |
-
-## Team Data
-
-The simulator uses real team rosters:
-
-**Al-Hilal** (`alhilal.csv`):
-- Full squad with positions
-- Player numbers
-- Realistic substitution patterns
-
-**Al-Nassr** (`alnassr.csv`):
-- Full squad with positions
-- Player numbers
-- Realistic substitution patterns
-
-## Output Example
+## Sample Output
 
 ```
-=== Match Simulator ===
-API URL: http://localhost:8080
-Match ID: match_20240115_143000
-Viewers: 100,000
+============================================================
+MATCH SIMULATION: AlHilal vs AlNassr
+Match ID: match_8f3a2bc1
+Target Viewers: 100,000
 Duration: 90 minutes
+============================================================
 
-Starting simulation...
+Ramping up to 100,000 viewers over 120s...
+  Added 10,000/100,000 viewers
+  Added 20,000/100,000 viewers
+  ...
+Ramp-up complete: 100,000 viewers active
 
-[00:00] Match started
-[15:22] ⚽ GOAL! Player #10 scores! (Engagement spike: 15,234 events)
-[23:45] 🟨 Yellow card - Player #7
-[45:00] Half-time (45,230 total events, 98.5% success rate)
-[67:12] ⚽ GOAL! Player #9 scores! (Engagement spike: 14,892 events)
-[78:30] 🔄 Substitution
-[90:00] Full-time
+Min  0 | Score: 0-0 | Viewers: 100,000 | Engagements: 12,453
+Min  5 | Score: 0-0 | Viewers: 99,234 | Engagements: 8,123
+...
+Min 23 | Score: 0-0 | Viewers: 98,456 | Engagements: 9,876
+Minute 23: GOAL - Score: 1-0
+Min 23 | Score: 1-0 | Viewers: 98,456 | Engagements: 145,234  <-- SPIKE!
+...
+Min 90 | Score: 2-1 | Viewers: 87,654 | Engagements: 125,000
 
-=== Summary ===
-Total game events: 1,247
-Total engagement events: 892,451
-Success rate: 99.2%
-Average latency: 23ms
-P95 latency: 87ms
-P99 latency: 142ms
+======================================================================
+MATCH SIMULATION COMPLETE
+======================================================================
+
+FINAL SCORE:         AlHilal 2 - 1 AlNassr
+Match ID:            match_8f3a2bc1
+
+----------------------------------------------------------------------
+GAME EVENTS ON FIELD
+----------------------------------------------------------------------
+Total Events:        3,245
+
+By Type:
+  pass                 2,100
+  shot                    89
+  foul                    78
+  goal                     2
+  ...
+
+----------------------------------------------------------------------
+VIEWER ENGAGEMENT
+----------------------------------------------------------------------
+Peak Viewers:        100,000
+Total Engagements:   2,456,789
+Eng/Viewer:          24.6
+
+Engagement by Type:
+  reaction           1,523,456 (62.0%)
+  comment              368,518 (15.0%)
+  video_action         245,679 (10.0%)
+  click                196,543 ( 8.0%)
+  share                 73,593 ( 3.0%)
+  prediction            49,000 ( 2.0%)
+
+Peak Engagement: Minute 23 (145,234 engagements)
+
+----------------------------------------------------------------------
+API PERFORMANCE
+----------------------------------------------------------------------
+Total Calls:         5,234
+Errors:                  12
+Error Rate:           0.23%
+Avg Latency:          45.2ms
+======================================================================
 ```
+
+---
+
+## Engagement Event Types
+
+### Reaction Subtypes
+`cheer`, `boo`, `emoji_goal`, `emoji_fire`, `emoji_clap`, `emoji_cry`, `emoji_angry`, `emoji_heart`, `emoji_laugh`, `emoji_wow`
+
+### Comment Subtypes
+`match_commentary`, `player_discussion`, `team_support`, `trash_talk`, `question`
+
+### Video Action Subtypes
+`pause`, `play`, `rewind`, `replay`, `camera_switch`, `quality_change`, `fullscreen`
+
+### Share Subtypes
+`twitter`, `facebook`, `whatsapp`, `instagram`, `in_app`, `copy_link`
+
+### Prediction Subtypes
+`score_prediction`, `next_goal`, `player_rating`, `poll_vote`, `man_of_match`
+
+### Click Subtypes
+`stats_view`, `player_profile`, `team_info`, `lineup`, `ad_click`, `merchandise`, `ticket`
+
+---
+
+## Performance Tips
+
+1. **Start Small**: Begin with `--viewers 1000` to verify setup
+2. **Batch Size**: Use `--batch-size 500` for optimal throughput
+3. **Concurrency**: Adjust `--concurrency 50` based on API capacity
+4. **Gradual Ramp-up**: Viewers are added gradually to avoid overwhelming the API
+5. **Monitor Grafana**: Watch dashboards during tests for bottlenecks
+
+---
 
 ## Monitoring During Tests
 
-### Grafana Dashboard
+### Grafana Dashboards
 
-1. Open http://localhost:3005
-2. Login (admin/admin)
-3. Navigate to: Dashboards → k6 Load Test
-4. Watch real-time metrics
-
-### Prometheus Queries
-
-```promql
-# Request rate
-sum(rate(http_requests_total[1m]))
-
-# Event ingestion rate
-sum(rate(events_ingested_total[1m])) by (type)
-
-# Latency percentiles
-histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[1m]))
-histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[1m]))
-
-# Kafka producer errors
-sum(rate(kafka_produce_errors_total[1m]))
-```
+1. Open http://localhost:3005 (dev) or https://grafana.your-domain.com (prod)
+2. Navigate to Dashboards
+3. Watch for:
+   - Request rate and latency
+   - Kafka consumer lag
+   - ClickHouse write throughput
+   - System resources (CPU, memory)
 
 ### ClickHouse Queries
 
 ```sql
 -- Events per minute
 SELECT
-    toStartOfMinute(timestamp) as minute,
-    count() as events
-FROM match_events
-WHERE match_id = 'match_001'
+  toStartOfMinute(timestamp) as minute,
+  count() as events
+FROM engagement_events
+WHERE match_id = 'match_8f3a2bc1'
 GROUP BY minute
 ORDER BY minute;
 
 -- Engagement by type
 SELECT
-    engagement_type,
-    count() as total
+  engagement_type,
+  count() as cnt
 FROM engagement_events
-WHERE match_id = 'match_001'
-GROUP BY engagement_type
-ORDER BY total DESC;
-
--- Peak engagement minute
-SELECT * FROM v_peak_engagement
-WHERE match_id = 'match_001';
+WHERE match_id = 'match_8f3a2bc1'
+GROUP BY engagement_type;
 ```
 
-## k6 Load Tests
+---
 
-For more advanced load testing, use k6:
+## Team Data
 
-### Run k6 Test
+The simulation uses player rosters from CSV files in `tests/load/`:
+- `alhilal.csv` - Al Hilal player data
+- `alnassr.csv` - Al Nassr player data
 
-```bash
-# Using the script
-./scripts/run-k6-test.sh
-
-# Start and follow logs
-./scripts/run-k6-test.sh --watch
-
-# Check status
-./scripts/run-k6-test.sh --status
-
-# Stop test
-./scripts/run-k6-test.sh --stop
+**CSV format:**
+```csv
+Name,Position,Number
+Player Name,MF,10
 ```
 
-### k6 Configuration
+---
 
-Edit `tests/load/k6.yml` for custom scenarios:
+## Dependencies
 
-```yaml
-options:
-  scenarios:
-    spike:
-      executor: ramping-vus
-      startVUs: 0
-      stages:
-        - duration: 2m
-          target: 100
-        - duration: 5m
-          target: 1000
-        - duration: 2m
-          target: 0
-```
-
-## Performance Tuning
-
-### API Server
-
-```bash
-# Increase worker threads
-SERVER_WORKERS=8
-
-# Increase connection pool
-DB_MAX_CONNECTIONS=100
-```
-
-### Kafka
-
-```bash
-# Increase partitions
-kafka-topics.sh --alter --topic football_simulator.events --partitions 12
-
-# Tune producer
-KAFKA_PRODUCER_BATCH_SIZE=16384
-KAFKA_PRODUCER_LINGER_MS=10
-```
-
-### ClickHouse
-
-```sql
--- Check memory usage
-SELECT * FROM system.metrics WHERE metric LIKE '%Memory%';
-
--- Optimize table
-OPTIMIZE TABLE engagement_events FINAL;
-```
-
-## Stress Testing
-
-For maximum load testing:
-
-```bash
-# Maximum viewers
-python match_simulator.py \
-  --viewers 500000 \
-  --batch-size 1000 \
-  --concurrency 100
-
-# Rapid fire events
-python match_simulator.py \
-  --duration 5 \
-  --events-per-second 10000
-```
-
-## Expected Performance
-
-| Metric | Target | Notes |
-|--------|--------|-------|
-| Events/second | 10,000+ | Sustained |
-| P50 latency | <50ms | Normal load |
-| P95 latency | <200ms | Normal load |
-| P99 latency | <500ms | Spike load |
-| Error rate | <0.1% | All scenarios |
-
-## Troubleshooting
-
-### High Latency
-
-```bash
-# Check API resources
-docker stats
-
-# Check ClickHouse
-docker exec -it $(docker ps -q -f name=clickhouse) \
-  clickhouse-client --query "SELECT * FROM system.processes"
-
-# Increase consumer batch size
-CONSUMER_BATCH_SIZE=2000
-```
-
-### Connection Errors
-
-```bash
-# Reduce concurrency
-python match_simulator.py --concurrency 20
-
-# Check Kafka connections
-docker exec $(docker ps -q -f name=kafka) \
-  kafka-consumer-groups.sh --bootstrap-server localhost:9092 --describe --all-groups
-```
-
-### Memory Issues
-
-```bash
-# Restart services
-docker compose restart
-
-# Increase Docker memory
-# Docker Desktop → Settings → Resources → Memory
-```
-
-## Best Practices
-
-1. **Start small** - Begin with 1,000 viewers, scale up gradually
-2. **Monitor constantly** - Watch Grafana during tests
-3. **Reset between tests** - Clear data for accurate measurements
-4. **Test incrementally** - Isolate issues by testing components separately
-5. **Document results** - Record metrics for comparison
-
-## Sample Test Plan
-
-### Phase 1: Baseline (Day 1)
-- 1,000 viewers, 5 minutes
-- Establish baseline metrics
-
-### Phase 2: Scale (Day 2)
-- 10,000 viewers, 30 minutes
-- Identify bottlenecks
-
-### Phase 3: Stress (Day 3)
-- 50,000 viewers, 60 minutes
-- Test recovery under load
-
-### Phase 4: Production (Day 4)
-- 100,000 viewers, 90 minutes
-- Full match simulation
-
-### Phase 5: Spike (Day 5)
-- 100,000 → 200,000 spike
-- Test goal event handling
+- `aiohttp>=3.9.0` - Async HTTP client
+- `tqdm>=4.66.0` - Progress bar
+- `requests>=2.31.0` - Sync HTTP client
+- `python-dotenv>=1.0.0` - Environment variable loading

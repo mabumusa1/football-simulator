@@ -25,7 +25,6 @@ NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 SERVICES_DIR="$PROJECT_DIR/infra/compose/prod"
-TESTS_DIR="$PROJECT_DIR/tests/load"
 STACK_NAME="${STACK_NAME:-football-simulator}"
 
 # Available services (order matters for dependencies)
@@ -36,7 +35,6 @@ SERVICES=(
     "go-api"
     "go-consumer"
     "monitoring"
-    "k6"
 )
 
 # -----------------------------------------------------------------------------
@@ -65,11 +63,7 @@ show_help() {
 
 get_service_file() {
     local svc="$1"
-    if [ "$svc" = "k6" ]; then
-        echo "$TESTS_DIR/k6.yml"
-    else
-        echo "$SERVICES_DIR/$svc.yml"
-    fi
+    echo "$SERVICES_DIR/$svc.yml"
 }
 
 list_services() {

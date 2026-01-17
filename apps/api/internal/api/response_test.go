@@ -61,8 +61,8 @@ func TestRespondJSON_EncodesData(t *testing.T) {
 			expected: `{"Name":"test"}`,
 		},
 		{
-			name: "slice",
-			data: []int{1, 2, 3},
+			name:     "slice",
+			data:     []int{1, 2, 3},
 			expected: `[1,2,3]`,
 		},
 		{

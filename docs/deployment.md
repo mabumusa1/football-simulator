@@ -1,7 +1,7 @@
 ---
 layout: default
 title: Deployment
-nav_order: 5
+nav_order: 4
 ---
 
 # Deployment Guide
@@ -343,7 +343,6 @@ docker service logs football_traefik
 1. Open https://grafana.your-domain.com
 2. Navigate to Dashboards
 3. View pre-configured dashboards:
-   - k6 Load Test
    - System Metrics
    - API Performance
 

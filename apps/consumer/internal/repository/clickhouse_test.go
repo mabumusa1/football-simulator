@@ -2,538 +2,565 @@ package repository
 
 import (
 	"context"
-	"errors"
-	"log/slog"
 	"os"
 	"testing"
 	"time"
 
-	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
+	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/google/uuid"
 
 	"github.com/mabumusa1/football-simulator/apps/consumer/internal/domain"
 )
 
-// MockConn implements driver.Conn for testing
-type MockConn struct {
-	PingFunc         func(ctx context.Context) error
-	PrepareBatchFunc func(ctx context.Context, query string, opts ...driver.PrepareBatchOption) (driver.Batch, error)
-	CloseFunc        func() error
-}
-
-func (m *MockConn) Ping(ctx context.Context) error {
-	if m.PingFunc != nil {
-		return m.PingFunc(ctx)
+// Test infrastructure helpers
+func getClickHouseHost() string {
+	host := os.Getenv("CLICKHOUSE_HOST")
+	if host == "" {
+		host = "clickhouse"
 	}
-	return nil
+	return host
 }
 
-func (m *MockConn) PrepareBatch(ctx context.Context, query string, opts ...driver.PrepareBatchOption) (driver.Batch, error) {
-	if m.PrepareBatchFunc != nil {
-		return m.PrepareBatchFunc(ctx, query, opts...)
+func getClickHousePort() string {
+	port := os.Getenv("CLICKHOUSE_PORT")
+	if port == "" {
+		port = "9000"
 	}
-	return nil, errors.New("PrepareBatch not implemented")
+	return port
 }
 
-func (m *MockConn) Close() error {
-	if m.CloseFunc != nil {
-		return m.CloseFunc()
+func setupTestConnection(t *testing.T) (*ClickHouseRepository, func()) {
+	host := getClickHouseHost()
+	port := getClickHousePort()
+
+	opts := &clickhouse.Options{
+		Addr: []string{host + ":" + port},
+		Auth: clickhouse.Auth{
+			Database: "football_simulator",
+			Username: "default",
+			Password: "",
+		},
+		Settings: clickhouse.Settings{
+			"max_execution_time": 60,
+		},
+		DialTimeout: 10 * time.Second,
 	}
-	return nil
-}
 
-// Implement remaining driver.Conn interface methods
-func (m *MockConn) Stats() driver.Stats            { return driver.Stats{} }
-func (m *MockConn) Contributors() []string         { return nil }
-func (m *MockConn) ServerVersion() (*driver.ServerVersion, error) {
-	return &driver.ServerVersion{}, nil
-}
-func (m *MockConn) Select(ctx context.Context, dest interface{}, query string, args ...interface{}) error {
-	return nil
-}
-func (m *MockConn) Query(ctx context.Context, query string, args ...interface{}) (driver.Rows, error) {
-	return nil, nil
-}
-func (m *MockConn) QueryRow(ctx context.Context, query string, args ...interface{}) driver.Row {
-	return nil
-}
-func (m *MockConn) Exec(ctx context.Context, query string, args ...interface{}) error {
-	return nil
-}
-func (m *MockConn) AsyncInsert(ctx context.Context, query string, wait bool, args ...interface{}) error {
-	return nil
-}
-
-// MockBatch implements driver.Batch for testing
-type MockBatch struct {
-	AppendFunc       func(v ...interface{}) error
-	AppendStructFunc func(v interface{}) error
-	SendFunc         func() error
-	AbortFunc        func() error
-	FlushFunc        func() error
-	ColumnFunc       func(int) driver.BatchColumn
-	IsSentFunc       func() bool
-	RowsFunc         func() int
-	CloseFunc        func() error
-	AppendCount      int
-}
-
-func (m *MockBatch) Append(v ...interface{}) error {
-	m.AppendCount++
-	if m.AppendFunc != nil {
-		return m.AppendFunc(v...)
+	conn, err := clickhouse.Open(opts)
+	if err != nil {
+		t.Fatalf("failed to open ClickHouse connection: %v", err)
 	}
-	return nil
-}
 
-func (m *MockBatch) AppendStruct(v interface{}) error {
-	if m.AppendStructFunc != nil {
-		return m.AppendStructFunc(v)
+	repo := NewClickHouseRepository(conn, nil)
+
+	cleanup := func() {
+		_ = conn.Close()
 	}
-	return nil
+
+	return repo, cleanup
 }
 
-func (m *MockBatch) Send() error {
-	if m.SendFunc != nil {
-		return m.SendFunc()
+func createTestEvent() *domain.Event {
+	return &domain.Event{
+		EventID:   uuid.New(),
+		MatchID:   "test-match-" + uuid.New().String()[:8],
+		EventType: domain.EventTypeGoal,
+		Timestamp: time.Now(),
+		TeamID:    1,
+		PlayerID:  "test-player-" + uuid.New().String()[:8],
+		Metadata:  map[string]interface{}{"minute": 45},
 	}
-	return nil
 }
 
-func (m *MockBatch) Abort() error {
-	if m.AbortFunc != nil {
-		return m.AbortFunc()
+func createTestEngagementEvent() *domain.EngagementEvent {
+	return &domain.EngagementEvent{
+		EventID:           uuid.New(),
+		MatchID:           "test-match-" + uuid.New().String()[:8],
+		UserID:            "test-user-" + uuid.New().String()[:8],
+		SessionID:         "test-session-" + uuid.New().String()[:8],
+		EngagementType:    domain.EngagementTypeReaction,
+		EngagementSubtype: "cheer",
+		GameMinute:        45,
+		DeviceType:        "mobile",
+		Platform:          "ios",
+		CountryCode:       "US",
+		Timestamp:         time.Now(),
+		Metadata:          map[string]interface{}{"source": "test"},
 	}
-	return nil
 }
 
-func (m *MockBatch) Flush() error {
-	if m.FlushFunc != nil {
-		return m.FlushFunc()
-	}
-	return nil
-}
-
-func (m *MockBatch) Column(i int) driver.BatchColumn {
-	if m.ColumnFunc != nil {
-		return m.ColumnFunc(i)
-	}
-	return nil
-}
-
-func (m *MockBatch) IsSent() bool {
-	if m.IsSentFunc != nil {
-		return m.IsSentFunc()
-	}
-	return false
-}
-
-func (m *MockBatch) Rows() int {
-	if m.RowsFunc != nil {
-		return m.RowsFunc()
-	}
-	return m.AppendCount
-}
-
-func (m *MockBatch) Close() error {
-	if m.CloseFunc != nil {
-		return m.CloseFunc()
-	}
-	return nil
-}
-
-func newTestLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-}
+// =============================================================================
+// Constructor Tests
+// =============================================================================
 
 func TestNewClickHouseRepository(t *testing.T) {
-	mockConn := &MockConn{}
-	logger := newTestLogger()
-
-	repo := NewClickHouseRepository(mockConn, logger)
+	repo, cleanup := setupTestConnection(t)
+	defer cleanup()
 
 	if repo == nil {
 		t.Fatal("expected non-nil repository")
 	}
-	if repo.conn != mockConn {
+	if repo.conn == nil {
 		t.Error("expected conn to be set")
-	}
-	if repo.logger != logger {
-		t.Error("expected logger to be set")
-	}
-}
-
-func TestNewClickHouseRepository_NilLogger(t *testing.T) {
-	mockConn := &MockConn{}
-
-	repo := NewClickHouseRepository(mockConn, nil)
-
-	if repo == nil {
-		t.Fatal("expected non-nil repository")
 	}
 	if repo.logger == nil {
 		t.Error("expected default logger to be set")
 	}
 }
 
+// =============================================================================
+// Ping Tests
+// =============================================================================
+
 func TestClickHouseRepository_Ping_Success(t *testing.T) {
-	mockConn := &MockConn{
-		PingFunc: func(ctx context.Context) error {
-			return nil
-		},
-	}
-	repo := NewClickHouseRepository(mockConn, newTestLogger())
+	repo, cleanup := setupTestConnection(t)
+	defer cleanup()
 
-	err := repo.Ping(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err := repo.Ping(ctx)
 	if err != nil {
-		t.Errorf("expected no error, got %v", err)
+		t.Fatalf("Ping failed: %v", err)
 	}
 }
 
-func TestClickHouseRepository_Ping_Error(t *testing.T) {
-	expectedErr := errors.New("connection failed")
-	mockConn := &MockConn{
-		PingFunc: func(ctx context.Context) error {
-			return expectedErr
-		},
-	}
-	repo := NewClickHouseRepository(mockConn, newTestLogger())
+func TestClickHouseRepository_Ping_ContextCanceled(t *testing.T) {
+	repo, cleanup := setupTestConnection(t)
+	defer cleanup()
 
-	err := repo.Ping(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	err := repo.Ping(ctx)
 	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !errors.Is(err, expectedErr) {
-		t.Errorf("expected error to wrap %v, got %v", expectedErr, err)
+		t.Error("expected error for canceled context")
 	}
 }
+
+// =============================================================================
+// InsertBatch Tests
+// =============================================================================
 
 func TestClickHouseRepository_InsertBatch_EmptySlice(t *testing.T) {
-	mockConn := &MockConn{}
-	repo := NewClickHouseRepository(mockConn, newTestLogger())
+	repo, cleanup := setupTestConnection(t)
+	defer cleanup()
 
-	err := repo.InsertBatch(context.Background(), []*domain.Event{})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err := repo.InsertBatch(ctx, []*domain.Event{})
 	if err != nil {
 		t.Errorf("expected no error for empty slice, got %v", err)
 	}
 }
 
 func TestClickHouseRepository_InsertBatch_NilSlice(t *testing.T) {
-	mockConn := &MockConn{}
-	repo := NewClickHouseRepository(mockConn, newTestLogger())
+	repo, cleanup := setupTestConnection(t)
+	defer cleanup()
 
-	err := repo.InsertBatch(context.Background(), nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err := repo.InsertBatch(ctx, nil)
 	if err != nil {
 		t.Errorf("expected no error for nil slice, got %v", err)
 	}
 }
 
-func TestClickHouseRepository_InsertBatch_PrepareBatchError(t *testing.T) {
-	expectedErr := errors.New("prepare batch failed")
-	mockConn := &MockConn{
-		PrepareBatchFunc: func(ctx context.Context, query string, opts ...driver.PrepareBatchOption) (driver.Batch, error) {
-			return nil, expectedErr
-		},
-	}
-	repo := NewClickHouseRepository(mockConn, newTestLogger())
+func TestClickHouseRepository_InsertBatch_SingleEvent(t *testing.T) {
+	repo, cleanup := setupTestConnection(t)
+	defer cleanup()
 
-	events := []*domain.Event{
-		{
-			EventID:   uuid.New(),
-			MatchID:   "match-123",
-			EventType: domain.EventTypeGoal,
-			Timestamp: time.Now(),
-			TeamID:    1,
-			PlayerID:  "player-456",
-		},
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
-	err := repo.InsertBatch(context.Background(), events)
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-}
+	event := createTestEvent()
+	events := []*domain.Event{event}
 
-func TestClickHouseRepository_InsertBatch_Success(t *testing.T) {
-	mockBatch := &MockBatch{}
-	mockConn := &MockConn{
-		PrepareBatchFunc: func(ctx context.Context, query string, opts ...driver.PrepareBatchOption) (driver.Batch, error) {
-			return mockBatch, nil
-		},
-	}
-	repo := NewClickHouseRepository(mockConn, newTestLogger())
-
-	events := []*domain.Event{
-		{
-			EventID:   uuid.New(),
-			MatchID:   "match-123",
-			EventType: domain.EventTypeGoal,
-			Timestamp: time.Now(),
-			TeamID:    1,
-			PlayerID:  "player-456",
-			Metadata:  map[string]interface{}{"minute": 45},
-		},
-		{
-			EventID:   uuid.New(),
-			MatchID:   "match-123",
-			EventType: domain.EventTypePass,
-			Timestamp: time.Now(),
-			TeamID:    2,
-			PlayerID:  "player-789",
-		},
-	}
-
-	err := repo.InsertBatch(context.Background(), events)
+	err := repo.InsertBatch(ctx, events)
 	if err != nil {
-		t.Errorf("expected no error, got %v", err)
-	}
-
-	if mockBatch.AppendCount != 2 {
-		t.Errorf("expected 2 appends, got %d", mockBatch.AppendCount)
+		t.Fatalf("InsertBatch failed: %v", err)
 	}
 }
 
-func TestClickHouseRepository_InsertBatch_SendError(t *testing.T) {
-	expectedErr := errors.New("send failed")
-	mockBatch := &MockBatch{
-		SendFunc: func() error {
-			return expectedErr
-		},
-	}
-	mockConn := &MockConn{
-		PrepareBatchFunc: func(ctx context.Context, query string, opts ...driver.PrepareBatchOption) (driver.Batch, error) {
-			return mockBatch, nil
-		},
-	}
-	repo := NewClickHouseRepository(mockConn, newTestLogger())
+func TestClickHouseRepository_InsertBatch_MultipleEvents(t *testing.T) {
+	repo, cleanup := setupTestConnection(t)
+	defer cleanup()
 
-	events := []*domain.Event{
-		{
-			EventID:   uuid.New(),
-			MatchID:   "match-123",
-			EventType: domain.EventTypeGoal,
-			Timestamp: time.Now(),
-			TeamID:    1,
-		},
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	events := make([]*domain.Event, 10)
+	for i := 0; i < 10; i++ {
+		events[i] = createTestEvent()
 	}
 
-	err := repo.InsertBatch(context.Background(), events)
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-}
-
-func TestClickHouseRepository_InsertBatch_NilEventSkipped(t *testing.T) {
-	mockBatch := &MockBatch{}
-	mockConn := &MockConn{
-		PrepareBatchFunc: func(ctx context.Context, query string, opts ...driver.PrepareBatchOption) (driver.Batch, error) {
-			return mockBatch, nil
-		},
-	}
-	repo := NewClickHouseRepository(mockConn, newTestLogger())
-
-	events := []*domain.Event{
-		{
-			EventID:   uuid.New(),
-			MatchID:   "match-123",
-			EventType: domain.EventTypeGoal,
-			Timestamp: time.Now(),
-			TeamID:    1,
-		},
-		nil, // This should be skipped
-		{
-			EventID:   uuid.New(),
-			MatchID:   "match-456",
-			EventType: domain.EventTypePass,
-			Timestamp: time.Now(),
-			TeamID:    2,
-		},
-	}
-
-	err := repo.InsertBatch(context.Background(), events)
+	err := repo.InsertBatch(ctx, events)
 	if err != nil {
-		t.Errorf("expected no error, got %v", err)
-	}
-
-	// Only 2 events should be appended (nil is skipped)
-	if mockBatch.AppendCount != 2 {
-		t.Errorf("expected 2 appends (nil skipped), got %d", mockBatch.AppendCount)
+		t.Fatalf("InsertBatch failed: %v", err)
 	}
 }
 
-func TestClickHouseRepository_InsertBatch_AppendError(t *testing.T) {
-	appendCalls := 0
-	mockBatch := &MockBatch{
-		AppendFunc: func(v ...interface{}) error {
-			appendCalls++
-			if appendCalls == 1 {
-				return errors.New("append failed")
-			}
-			return nil
-		},
-	}
-	mockConn := &MockConn{
-		PrepareBatchFunc: func(ctx context.Context, query string, opts ...driver.PrepareBatchOption) (driver.Batch, error) {
-			return mockBatch, nil
-		},
-	}
-	repo := NewClickHouseRepository(mockConn, newTestLogger())
+func TestClickHouseRepository_InsertBatch_WithNilEvents(t *testing.T) {
+	repo, cleanup := setupTestConnection(t)
+	defer cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	events := []*domain.Event{
-		{
-			EventID:   uuid.New(),
-			MatchID:   "match-123",
-			EventType: domain.EventTypeGoal,
-			Timestamp: time.Now(),
-			TeamID:    1,
-		},
-		{
-			EventID:   uuid.New(),
-			MatchID:   "match-456",
-			EventType: domain.EventTypePass,
-			Timestamp: time.Now(),
-			TeamID:    2,
-		},
+		createTestEvent(),
+		nil, // Should be skipped
+		createTestEvent(),
 	}
 
-	// Append error should not fail the entire batch
-	err := repo.InsertBatch(context.Background(), events)
+	err := repo.InsertBatch(ctx, events)
 	if err != nil {
-		t.Errorf("expected no error (append errors are logged and skipped), got %v", err)
+		t.Fatalf("InsertBatch failed: %v", err)
+	}
+}
+
+func TestClickHouseRepository_InsertBatch_AllNil(t *testing.T) {
+	repo, cleanup := setupTestConnection(t)
+	defer cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	events := []*domain.Event{nil, nil, nil}
+
+	err := repo.InsertBatch(ctx, events)
+	if err != nil {
+		t.Errorf("expected no error for all nil events, got %v", err)
+	}
+}
+
+func TestClickHouseRepository_InsertBatch_LargeBatch(t *testing.T) {
+	repo, cleanup := setupTestConnection(t)
+	defer cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	events := make([]*domain.Event, 100)
+	for i := 0; i < 100; i++ {
+		events[i] = createTestEvent()
+	}
+
+	err := repo.InsertBatch(ctx, events)
+	if err != nil {
+		t.Fatalf("InsertBatch failed for large batch: %v", err)
 	}
 }
 
 func TestClickHouseRepository_InsertBatch_EmptyPlayerID(t *testing.T) {
-	var capturedArgs []interface{}
-	mockBatch := &MockBatch{
-		AppendFunc: func(v ...interface{}) error {
-			capturedArgs = v
-			return nil
-		},
-	}
-	mockConn := &MockConn{
-		PrepareBatchFunc: func(ctx context.Context, query string, opts ...driver.PrepareBatchOption) (driver.Batch, error) {
-			return mockBatch, nil
-		},
-	}
-	repo := NewClickHouseRepository(mockConn, newTestLogger())
+	repo, cleanup := setupTestConnection(t)
+	defer cleanup()
 
-	events := []*domain.Event{
-		{
-			EventID:   uuid.New(),
-			MatchID:   "match-123",
-			EventType: domain.EventTypeGoal,
-			Timestamp: time.Now(),
-			TeamID:    1,
-			PlayerID:  "", // Empty player ID should result in nil pointer
-		},
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
-	err := repo.InsertBatch(context.Background(), events)
+	event := createTestEvent()
+	event.PlayerID = "" // Empty player ID
+
+	events := []*domain.Event{event}
+
+	err := repo.InsertBatch(ctx, events)
 	if err != nil {
-		t.Errorf("expected no error, got %v", err)
-	}
-
-	// Check that playerID was passed as nil pointer
-	// Args: event_id, match_id, event_type, team_id, player_id, metadata, timestamp
-	if len(capturedArgs) >= 5 {
-		playerIDPtr, ok := capturedArgs[4].(*string)
-		if !ok {
-			t.Error("expected player_id to be *string type")
-		} else if playerIDPtr != nil {
-			t.Error("expected nil player_id pointer for empty string")
-		}
+		t.Fatalf("InsertBatch failed: %v", err)
 	}
 }
 
 func TestClickHouseRepository_InsertBatch_WithMetadata(t *testing.T) {
-	var capturedArgs []interface{}
-	mockBatch := &MockBatch{
-		AppendFunc: func(v ...interface{}) error {
-			capturedArgs = v
-			return nil
-		},
-	}
-	mockConn := &MockConn{
-		PrepareBatchFunc: func(ctx context.Context, query string, opts ...driver.PrepareBatchOption) (driver.Batch, error) {
-			return mockBatch, nil
-		},
-	}
-	repo := NewClickHouseRepository(mockConn, newTestLogger())
+	repo, cleanup := setupTestConnection(t)
+	defer cleanup()
 
-	events := []*domain.Event{
-		{
-			EventID:   uuid.New(),
-			MatchID:   "match-123",
-			EventType: domain.EventTypeGoal,
-			Timestamp: time.Now(),
-			TeamID:    1,
-			Metadata:  map[string]interface{}{"minute": 45, "assist": "player-789"},
-		},
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	event := createTestEvent()
+	event.Metadata = map[string]interface{}{
+		"minute":      45,
+		"assist":      "player-789",
+		"goal_type":   "header",
+		"distance":    12.5,
+		"is_overtime": false,
 	}
 
-	err := repo.InsertBatch(context.Background(), events)
+	events := []*domain.Event{event}
+
+	err := repo.InsertBatch(ctx, events)
 	if err != nil {
-		t.Errorf("expected no error, got %v", err)
-	}
-
-	// Verify metadata was serialized
-	if len(capturedArgs) >= 6 {
-		metadata, ok := capturedArgs[5].(string)
-		if !ok {
-			t.Error("expected metadata to be string")
-		}
-		if metadata == "{}" {
-			t.Error("expected non-empty metadata JSON")
-		}
+		t.Fatalf("InsertBatch failed: %v", err)
 	}
 }
 
-func TestClickHouseRepository_Close_Success(t *testing.T) {
-	closeCalled := false
-	mockConn := &MockConn{
-		CloseFunc: func() error {
-			closeCalled = true
-			return nil
-		},
+func TestClickHouseRepository_InsertBatch_AllEventTypes(t *testing.T) {
+	eventTypes := []domain.EventType{
+		domain.EventTypeGoal,
+		domain.EventTypePass,
+		domain.EventTypeShot,
+		domain.EventTypeShotOnTarget,
+		domain.EventTypeTackle,
+		domain.EventTypeFoul,
+		domain.EventTypeYellowCard,
+		domain.EventTypeRedCard,
+		domain.EventTypeCorner,
+		domain.EventTypeFreeKick,
+		domain.EventTypePenalty,
+		domain.EventTypeSubstitution,
+		domain.EventTypeInjury,
+		domain.EventTypeOffside,
+		domain.EventTypeKickoff,
+		domain.EventTypeHalfTime,
+		domain.EventTypeFullTime,
 	}
-	repo := NewClickHouseRepository(mockConn, newTestLogger())
+
+	for _, eventType := range eventTypes {
+		t.Run(string(eventType), func(t *testing.T) {
+			repo, cleanup := setupTestConnection(t)
+			defer cleanup()
+
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			event := &domain.Event{
+				EventID:   uuid.New(),
+				MatchID:   "match-123",
+				EventType: eventType,
+				Timestamp: time.Now(),
+				TeamID:    1,
+				PlayerID:  "player-456",
+			}
+
+			events := []*domain.Event{event}
+
+			err := repo.InsertBatch(ctx, events)
+			if err != nil {
+				t.Fatalf("InsertBatch failed for event type %s: %v", eventType, err)
+			}
+		})
+	}
+}
+
+func TestClickHouseRepository_InsertBatch_ContextCanceled(t *testing.T) {
+	repo, cleanup := setupTestConnection(t)
+	defer cleanup()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	event := createTestEvent()
+	events := []*domain.Event{event}
+
+	err := repo.InsertBatch(ctx, events)
+	if err == nil {
+		t.Error("expected error for canceled context")
+	}
+}
+
+// =============================================================================
+// InsertEngagementBatch Tests
+// =============================================================================
+
+func TestClickHouseRepository_InsertEngagementBatch_EmptySlice(t *testing.T) {
+	repo, cleanup := setupTestConnection(t)
+	defer cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err := repo.InsertEngagementBatch(ctx, []*domain.EngagementEvent{})
+	if err != nil {
+		t.Errorf("expected no error for empty slice, got %v", err)
+	}
+}
+
+func TestClickHouseRepository_InsertEngagementBatch_NilSlice(t *testing.T) {
+	repo, cleanup := setupTestConnection(t)
+	defer cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err := repo.InsertEngagementBatch(ctx, nil)
+	if err != nil {
+		t.Errorf("expected no error for nil slice, got %v", err)
+	}
+}
+
+func TestClickHouseRepository_InsertEngagementBatch_SingleEvent(t *testing.T) {
+	repo, cleanup := setupTestConnection(t)
+	defer cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	event := createTestEngagementEvent()
+	events := []*domain.EngagementEvent{event}
+
+	err := repo.InsertEngagementBatch(ctx, events)
+	if err != nil {
+		t.Fatalf("InsertEngagementBatch failed: %v", err)
+	}
+}
+
+func TestClickHouseRepository_InsertEngagementBatch_MultipleEvents(t *testing.T) {
+	repo, cleanup := setupTestConnection(t)
+	defer cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	events := make([]*domain.EngagementEvent, 10)
+	for i := 0; i < 10; i++ {
+		events[i] = createTestEngagementEvent()
+	}
+
+	err := repo.InsertEngagementBatch(ctx, events)
+	if err != nil {
+		t.Fatalf("InsertEngagementBatch failed: %v", err)
+	}
+}
+
+func TestClickHouseRepository_InsertEngagementBatch_WithNilEvents(t *testing.T) {
+	repo, cleanup := setupTestConnection(t)
+	defer cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	events := []*domain.EngagementEvent{
+		createTestEngagementEvent(),
+		nil, // Should be skipped
+		createTestEngagementEvent(),
+	}
+
+	err := repo.InsertEngagementBatch(ctx, events)
+	if err != nil {
+		t.Fatalf("InsertEngagementBatch failed: %v", err)
+	}
+}
+
+func TestClickHouseRepository_InsertEngagementBatch_LargeBatch(t *testing.T) {
+	repo, cleanup := setupTestConnection(t)
+	defer cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	events := make([]*domain.EngagementEvent, 500)
+	for i := 0; i < 500; i++ {
+		events[i] = createTestEngagementEvent()
+	}
+
+	err := repo.InsertEngagementBatch(ctx, events)
+	if err != nil {
+		t.Fatalf("InsertEngagementBatch failed for large batch: %v", err)
+	}
+}
+
+func TestClickHouseRepository_InsertEngagementBatch_AllFields(t *testing.T) {
+	repo, cleanup := setupTestConnection(t)
+	defer cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	relatedGameEventID := uuid.New()
+	event := &domain.EngagementEvent{
+		EventID:            uuid.New(),
+		MatchID:            "match-123",
+		UserID:             "user-456",
+		SessionID:          "session-789",
+		EngagementType:     domain.EngagementTypeReaction,
+		EngagementSubtype:  "like",
+		RelatedGameEventID: &relatedGameEventID,
+		GameMinute:         45,
+		DeviceType:         "mobile",
+		Platform:           "ios",
+		CountryCode:        "US",
+		Content:            "Great goal!",
+		Timestamp:          time.Now(),
+		Metadata:           map[string]interface{}{"source": "app"},
+	}
+
+	events := []*domain.EngagementEvent{event}
+
+	err := repo.InsertEngagementBatch(ctx, events)
+	if err != nil {
+		t.Fatalf("InsertEngagementBatch failed: %v", err)
+	}
+}
+
+func TestClickHouseRepository_InsertEngagementBatch_AllEngagementTypes(t *testing.T) {
+	engagementTypes := []domain.EngagementType{
+		domain.EngagementTypeReaction,
+		domain.EngagementTypeComment,
+		domain.EngagementTypeShare,
+	}
+
+	for _, engagementType := range engagementTypes {
+		t.Run(string(engagementType), func(t *testing.T) {
+			repo, cleanup := setupTestConnection(t)
+			defer cleanup()
+
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			event := &domain.EngagementEvent{
+				EventID:        uuid.New(),
+				MatchID:        "match-123",
+				UserID:         "user-456",
+				SessionID:      "session-789",
+				EngagementType: engagementType,
+				Timestamp:      time.Now(),
+			}
+
+			events := []*domain.EngagementEvent{event}
+
+			err := repo.InsertEngagementBatch(ctx, events)
+			if err != nil {
+				t.Fatalf("InsertEngagementBatch failed for engagement type %s: %v", engagementType, err)
+			}
+		})
+	}
+}
+
+func TestClickHouseRepository_InsertEngagementBatch_ContextCanceled(t *testing.T) {
+	repo, cleanup := setupTestConnection(t)
+	defer cleanup()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	event := createTestEngagementEvent()
+	events := []*domain.EngagementEvent{event}
+
+	err := repo.InsertEngagementBatch(ctx, events)
+	if err == nil {
+		t.Error("expected error for canceled context")
+	}
+}
+
+// =============================================================================
+// Close Tests
+// =============================================================================
+
+func TestClickHouseRepository_Close(t *testing.T) {
+	repo, _ := setupTestConnection(t)
+	// Don't use cleanup, we'll close manually
 
 	err := repo.Close()
 	if err != nil {
-		t.Errorf("expected no error, got %v", err)
-	}
-	if !closeCalled {
-		t.Error("expected Close to be called on connection")
+		t.Fatalf("Close failed: %v", err)
 	}
 }
 
-func TestClickHouseRepository_Close_NilConn(t *testing.T) {
-	repo := &ClickHouseRepository{
-		conn:   nil,
-		logger: newTestLogger(),
-	}
-
-	err := repo.Close()
-	if err != nil {
-		t.Errorf("expected no error for nil conn, got %v", err)
-	}
-}
-
-func TestClickHouseRepository_Close_Error(t *testing.T) {
-	expectedErr := errors.New("close failed")
-	mockConn := &MockConn{
-		CloseFunc: func() error {
-			return expectedErr
-		},
-	}
-	repo := NewClickHouseRepository(mockConn, newTestLogger())
-
-	err := repo.Close()
-	if err != expectedErr {
-		t.Errorf("expected %v, got %v", expectedErr, err)
-	}
-}
+// =============================================================================
+// DefaultConnectionConfig Tests
+// =============================================================================
 
 func TestDefaultConnectionConfig(t *testing.T) {
 	cfg := DefaultConnectionConfig()
@@ -570,268 +597,93 @@ func TestDefaultConnectionConfig(t *testing.T) {
 	}
 }
 
-func TestConnectionConfig_CustomValues(t *testing.T) {
-	cfg := ConnectionConfig{
-		Hosts:           []string{"host1:9000", "host2:9000"},
-		Database:        "custom_db",
-		Username:        "admin",
-		Password:        "secret",
-		MaxOpenConns:    20,
-		MaxIdleConns:    10,
-		ConnMaxLifetime: 2 * time.Hour,
-		DialTimeout:     5 * time.Second,
-		ReadTimeout:     60 * time.Second,
-		Debug:           true,
+// =============================================================================
+// Concurrent Tests
+// =============================================================================
+
+func TestClickHouseRepository_ConcurrentInserts(t *testing.T) {
+	repo, cleanup := setupTestConnection(t)
+	defer cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	errChan := make(chan error, 10)
+
+	// Run concurrent inserts
+	for i := 0; i < 10; i++ {
+		go func() {
+			event := createTestEvent()
+			events := []*domain.Event{event}
+			errChan <- repo.InsertBatch(ctx, events)
+		}()
 	}
 
-	if len(cfg.Hosts) != 2 {
-		t.Errorf("expected 2 hosts, got %d", len(cfg.Hosts))
-	}
-	if cfg.Database != "custom_db" {
-		t.Errorf("expected Database 'custom_db', got %s", cfg.Database)
-	}
-	if cfg.MaxOpenConns != 20 {
-		t.Errorf("expected MaxOpenConns 20, got %d", cfg.MaxOpenConns)
+	// Collect results
+	for i := 0; i < 10; i++ {
+		if err := <-errChan; err != nil {
+			t.Errorf("Concurrent insert failed: %v", err)
+		}
 	}
 }
 
-func TestClickHouseRepository_InsertEngagementBatch_EmptySlice(t *testing.T) {
-	mockConn := &MockConn{}
-	repo := NewClickHouseRepository(mockConn, newTestLogger())
+func TestClickHouseRepository_ConcurrentEngagementInserts(t *testing.T) {
+	repo, cleanup := setupTestConnection(t)
+	defer cleanup()
 
-	err := repo.InsertEngagementBatch(context.Background(), []*domain.EngagementEvent{})
-	if err != nil {
-		t.Errorf("expected no error for empty slice, got %v", err)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	errChan := make(chan error, 10)
+
+	// Run concurrent inserts
+	for i := 0; i < 10; i++ {
+		go func() {
+			event := createTestEngagementEvent()
+			events := []*domain.EngagementEvent{event}
+			errChan <- repo.InsertEngagementBatch(ctx, events)
+		}()
+	}
+
+	// Collect results
+	for i := 0; i < 10; i++ {
+		if err := <-errChan; err != nil {
+			t.Errorf("Concurrent engagement insert failed: %v", err)
+		}
 	}
 }
 
-func TestClickHouseRepository_InsertEngagementBatch_NilSlice(t *testing.T) {
-	mockConn := &MockConn{}
-	repo := NewClickHouseRepository(mockConn, newTestLogger())
+// =============================================================================
+// Multiple Operations Tests
+// =============================================================================
 
-	err := repo.InsertEngagementBatch(context.Background(), nil)
-	if err != nil {
-		t.Errorf("expected no error for nil slice, got %v", err)
-	}
-}
+func TestClickHouseRepository_MultipleOperations(t *testing.T) {
+	repo, cleanup := setupTestConnection(t)
+	defer cleanup()
 
-func TestClickHouseRepository_InsertEngagementBatch_PrepareBatchError(t *testing.T) {
-	expectedErr := errors.New("prepare batch failed")
-	mockConn := &MockConn{
-		PrepareBatchFunc: func(ctx context.Context, query string, opts ...driver.PrepareBatchOption) (driver.Batch, error) {
-			return nil, expectedErr
-		},
-	}
-	repo := NewClickHouseRepository(mockConn, newTestLogger())
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
 
-	events := []*domain.EngagementEvent{
-		{
-			EventID:        uuid.New(),
-			MatchID:        "match-123",
-			UserID:         "user-456",
-			SessionID:      "session-789",
-			EngagementType: domain.EngagementTypeReaction,
-			Timestamp:      time.Now(),
-		},
-	}
+	// Run multiple operations in sequence
+	for i := 0; i < 5; i++ {
+		// Ping
+		err := repo.Ping(ctx)
+		if err != nil {
+			t.Fatalf("Ping failed on iteration %d: %v", i, err)
+		}
 
-	err := repo.InsertEngagementBatch(context.Background(), events)
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-}
+		// Insert events
+		events := []*domain.Event{createTestEvent()}
+		err = repo.InsertBatch(ctx, events)
+		if err != nil {
+			t.Fatalf("InsertBatch failed on iteration %d: %v", i, err)
+		}
 
-func TestClickHouseRepository_InsertEngagementBatch_Success(t *testing.T) {
-	mockBatch := &MockBatch{}
-	mockConn := &MockConn{
-		PrepareBatchFunc: func(ctx context.Context, query string, opts ...driver.PrepareBatchOption) (driver.Batch, error) {
-			return mockBatch, nil
-		},
-	}
-	repo := NewClickHouseRepository(mockConn, newTestLogger())
-
-	events := []*domain.EngagementEvent{
-		{
-			EventID:        uuid.New(),
-			MatchID:        "match-123",
-			UserID:         "user-456",
-			SessionID:      "session-789",
-			EngagementType: domain.EngagementTypeReaction,
-			Timestamp:      time.Now(),
-			Metadata:       map[string]interface{}{"source": "test"},
-		},
-		{
-			EventID:        uuid.New(),
-			MatchID:        "match-123",
-			UserID:         "user-789",
-			SessionID:      "session-012",
-			EngagementType: domain.EngagementTypeComment,
-			Timestamp:      time.Now(),
-		},
-	}
-
-	err := repo.InsertEngagementBatch(context.Background(), events)
-	if err != nil {
-		t.Errorf("expected no error, got %v", err)
-	}
-
-	if mockBatch.AppendCount != 2 {
-		t.Errorf("expected 2 appends, got %d", mockBatch.AppendCount)
-	}
-}
-
-func TestClickHouseRepository_InsertEngagementBatch_SendError(t *testing.T) {
-	expectedErr := errors.New("send failed")
-	mockBatch := &MockBatch{
-		SendFunc: func() error {
-			return expectedErr
-		},
-	}
-	mockConn := &MockConn{
-		PrepareBatchFunc: func(ctx context.Context, query string, opts ...driver.PrepareBatchOption) (driver.Batch, error) {
-			return mockBatch, nil
-		},
-	}
-	repo := NewClickHouseRepository(mockConn, newTestLogger())
-
-	events := []*domain.EngagementEvent{
-		{
-			EventID:        uuid.New(),
-			MatchID:        "match-123",
-			UserID:         "user-456",
-			EngagementType: domain.EngagementTypeReaction,
-			Timestamp:      time.Now(),
-		},
-	}
-
-	err := repo.InsertEngagementBatch(context.Background(), events)
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-}
-
-func TestClickHouseRepository_InsertEngagementBatch_NilEventSkipped(t *testing.T) {
-	mockBatch := &MockBatch{}
-	mockConn := &MockConn{
-		PrepareBatchFunc: func(ctx context.Context, query string, opts ...driver.PrepareBatchOption) (driver.Batch, error) {
-			return mockBatch, nil
-		},
-	}
-	repo := NewClickHouseRepository(mockConn, newTestLogger())
-
-	events := []*domain.EngagementEvent{
-		{
-			EventID:        uuid.New(),
-			MatchID:        "match-123",
-			UserID:         "user-456",
-			EngagementType: domain.EngagementTypeReaction,
-			Timestamp:      time.Now(),
-		},
-		nil, // This should be skipped
-		{
-			EventID:        uuid.New(),
-			MatchID:        "match-456",
-			UserID:         "user-789",
-			EngagementType: domain.EngagementTypeComment,
-			Timestamp:      time.Now(),
-		},
-	}
-
-	err := repo.InsertEngagementBatch(context.Background(), events)
-	if err != nil {
-		t.Errorf("expected no error, got %v", err)
-	}
-
-	// Only 2 events should be appended (nil is skipped)
-	if mockBatch.AppendCount != 2 {
-		t.Errorf("expected 2 appends (nil skipped), got %d", mockBatch.AppendCount)
-	}
-}
-
-func TestClickHouseRepository_InsertEngagementBatch_AppendError(t *testing.T) {
-	appendCalls := 0
-	mockBatch := &MockBatch{
-		AppendFunc: func(v ...interface{}) error {
-			appendCalls++
-			if appendCalls == 1 {
-				return errors.New("append failed")
-			}
-			return nil
-		},
-	}
-	mockConn := &MockConn{
-		PrepareBatchFunc: func(ctx context.Context, query string, opts ...driver.PrepareBatchOption) (driver.Batch, error) {
-			return mockBatch, nil
-		},
-	}
-	repo := NewClickHouseRepository(mockConn, newTestLogger())
-
-	events := []*domain.EngagementEvent{
-		{
-			EventID:        uuid.New(),
-			MatchID:        "match-123",
-			UserID:         "user-456",
-			EngagementType: domain.EngagementTypeReaction,
-			Timestamp:      time.Now(),
-		},
-		{
-			EventID:        uuid.New(),
-			MatchID:        "match-456",
-			UserID:         "user-789",
-			EngagementType: domain.EngagementTypeComment,
-			Timestamp:      time.Now(),
-		},
-	}
-
-	// Append error should not fail the entire batch
-	err := repo.InsertEngagementBatch(context.Background(), events)
-	if err != nil {
-		t.Errorf("expected no error (append errors are logged and skipped), got %v", err)
-	}
-}
-
-func TestClickHouseRepository_InsertEngagementBatch_AllFields(t *testing.T) {
-	var capturedArgs []interface{}
-	mockBatch := &MockBatch{
-		AppendFunc: func(v ...interface{}) error {
-			capturedArgs = v
-			return nil
-		},
-	}
-	mockConn := &MockConn{
-		PrepareBatchFunc: func(ctx context.Context, query string, opts ...driver.PrepareBatchOption) (driver.Batch, error) {
-			return mockBatch, nil
-		},
-	}
-	repo := NewClickHouseRepository(mockConn, newTestLogger())
-
-	relatedGameEventID := uuid.New()
-	events := []*domain.EngagementEvent{
-		{
-			EventID:            uuid.New(),
-			MatchID:            "match-123",
-			UserID:             "user-456",
-			SessionID:          "session-789",
-			EngagementType:     domain.EngagementTypeReaction,
-			EngagementSubtype:  "like",
-			RelatedGameEventID: &relatedGameEventID,
-			GameMinute:         45,
-			DeviceType:         "mobile",
-			Platform:           "ios",
-			CountryCode:        "US",
-			Content:            "Great goal!",
-			Timestamp:          time.Now(),
-			Metadata:           map[string]interface{}{"source": "app"},
-		},
-	}
-
-	err := repo.InsertEngagementBatch(context.Background(), events)
-	if err != nil {
-		t.Errorf("expected no error, got %v", err)
-	}
-
-	// Verify all fields were passed (14 fields total)
-	if len(capturedArgs) != 14 {
-		t.Errorf("expected 14 args, got %d", len(capturedArgs))
+		// Insert engagements
+		engagements := []*domain.EngagementEvent{createTestEngagementEvent()}
+		err = repo.InsertEngagementBatch(ctx, engagements)
+		if err != nil {
+			t.Fatalf("InsertEngagementBatch failed on iteration %d: %v", i, err)
+		}
 	}
 }

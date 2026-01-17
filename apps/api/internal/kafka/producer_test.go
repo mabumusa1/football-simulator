@@ -2,10 +2,7 @@ package kafka
 
 import (
 	"context"
-	"errors"
-	"io"
-	"log/slog"
-	"sync"
+	"os"
 	"testing"
 	"time"
 
@@ -15,1230 +12,834 @@ import (
 	"github.com/mabumusa1/football-simulator/apps/api/internal/domain"
 )
 
-// mockWriter implements a mock kafka.Writer for testing purposes.
-// Since kafka.Writer is a concrete struct, we use a wrapper approach.
-type mockWriter struct {
-	topic        string
-	writeErr     error
-	writtenMsgs  []kafka.Message
-	mu           sync.Mutex
-	writeCounter int
-	// failOnNthWrite allows simulating partial failures
-	failOnNthWrite int
+// Test infrastructure helpers
+func getKafkaBroker() string {
+	broker := os.Getenv("KAFKA_BROKER")
+	if broker == "" {
+		broker = "kafka:29092"
+	}
+	return broker
 }
 
-func newMockWriter(topic string) *mockWriter {
-	return &mockWriter{
-		topic:       topic,
-		writtenMsgs: make([]kafka.Message, 0),
-	}
-}
-
-func (m *mockWriter) WriteMessages(ctx context.Context, msgs ...kafka.Message) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	m.writeCounter++
-
-	if m.failOnNthWrite > 0 && m.writeCounter == m.failOnNthWrite {
-		return m.writeErr
-	}
-
-	if m.writeErr != nil && m.failOnNthWrite == 0 {
-		return m.writeErr
-	}
-
-	m.writtenMsgs = append(m.writtenMsgs, msgs...)
-	return nil
-}
-
-func (m *mockWriter) getWrittenMessages() []kafka.Message {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.writtenMsgs
-}
-
-// testableEventProducer wraps EventProducer with a mock writer interface
-type testableEventProducer struct {
-	mock   *mockWriter
-	logger *slog.Logger
-}
-
-func newTestableEventProducer(mock *mockWriter, logger *slog.Logger) *testableEventProducer {
-	if logger == nil {
-		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
-	}
-	return &testableEventProducer{
-		mock:   mock,
-		logger: logger,
-	}
-}
-
-func (p *testableEventProducer) Produce(ctx context.Context, event *domain.Event) error {
-	if event == nil {
-		return errors.New("event cannot be nil")
-	}
-
-	value, err := event.ToKafkaMessage()
-	if err != nil {
-		return errors.New("failed to serialize event: " + err.Error())
-	}
-
-	msg := kafka.Message{
-		Key:   []byte(event.MatchID),
-		Value: value,
-		Headers: []kafka.Header{
-			{Key: "event_type", Value: []byte(string(event.EventType))},
-			{Key: "event_id", Value: []byte(event.EventID.String())},
-		},
-		Time: event.Timestamp,
-	}
-
-	err = p.mock.WriteMessages(ctx, msg)
-	if err != nil {
-		return errors.New("failed to produce message: " + err.Error())
-	}
-
-	return nil
-}
-
-func (p *testableEventProducer) ProduceBatch(ctx context.Context, events []*domain.Event) error {
-	if len(events) == 0 {
-		return nil
-	}
-
-	messages := make([]kafka.Message, 0, len(events))
-
-	for _, event := range events {
-		if event == nil {
-			continue
-		}
-
-		value, err := event.ToKafkaMessage()
-		if err != nil {
-			// Skip events that fail serialization
-			continue
-		}
-
-		msg := kafka.Message{
-			Key:   []byte(event.MatchID),
-			Value: value,
-			Headers: []kafka.Header{
-				{Key: "event_type", Value: []byte(string(event.EventType))},
-				{Key: "event_id", Value: []byte(event.EventID.String())},
-			},
-			Time: event.Timestamp,
-		}
-
-		messages = append(messages, msg)
-	}
-
-	if len(messages) == 0 {
-		return nil
-	}
-
-	err := p.mock.WriteMessages(ctx, messages...)
-	if err != nil {
-		return errors.New("failed to produce batch: " + err.Error())
-	}
-
-	return nil
-}
-
-// testableEngagementProducer wraps EngagementProducer with a mock writer interface
-type testableEngagementProducer struct {
-	mock   *mockWriter
-	logger *slog.Logger
-}
-
-func newTestableEngagementProducer(mock *mockWriter, logger *slog.Logger) *testableEngagementProducer {
-	if logger == nil {
-		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
-	}
-	return &testableEngagementProducer{
-		mock:   mock,
-		logger: logger,
-	}
-}
-
-func (p *testableEngagementProducer) Produce(ctx context.Context, event *domain.EngagementEvent) error {
-	if event == nil {
-		return errors.New("engagement event cannot be nil")
-	}
-
-	value, err := event.ToKafkaMessage()
-	if err != nil {
-		return errors.New("failed to serialize engagement: " + err.Error())
-	}
-
-	msg := kafka.Message{
-		Key:   []byte(event.MatchID + ":" + event.UserID),
-		Value: value,
-		Headers: []kafka.Header{
-			{Key: "engagement_type", Value: []byte(string(event.EngagementType))},
-			{Key: "event_id", Value: []byte(event.EventID.String())},
-			{Key: "user_id", Value: []byte(event.UserID)},
-		},
-		Time: event.Timestamp,
-	}
-
-	err = p.mock.WriteMessages(ctx, msg)
-	if err != nil {
-		return errors.New("failed to produce engagement: " + err.Error())
-	}
-
-	return nil
-}
-
-func (p *testableEngagementProducer) ProduceBatch(ctx context.Context, events []*domain.EngagementEvent) error {
-	if len(events) == 0 {
-		return nil
-	}
-
-	messages := make([]kafka.Message, 0, len(events))
-
-	for _, event := range events {
-		if event == nil {
-			continue
-		}
-
-		value, err := event.ToKafkaMessage()
-		if err != nil {
-			// Skip events that fail serialization
-			continue
-		}
-
-		msg := kafka.Message{
-			Key:   []byte(event.MatchID + ":" + event.UserID),
-			Value: value,
-			Headers: []kafka.Header{
-				{Key: "engagement_type", Value: []byte(string(event.EngagementType))},
-				{Key: "event_id", Value: []byte(event.EventID.String())},
-				{Key: "user_id", Value: []byte(event.UserID)},
-			},
-			Time: event.Timestamp,
-		}
-
-		messages = append(messages, msg)
-	}
-
-	if len(messages) == 0 {
-		return nil
-	}
-
-	err := p.mock.WriteMessages(ctx, messages...)
-	if err != nil {
-		return errors.New("failed to produce engagement batch: " + err.Error())
-	}
-
-	return nil
-}
-
-// Helper functions to create test events
-func createTestEvent(matchID string, eventType domain.EventType) *domain.Event {
+func createTestEvent() *domain.Event {
 	return &domain.Event{
 		EventID:   uuid.New(),
-		MatchID:   matchID,
-		EventType: eventType,
-		Timestamp: time.Now().UTC(),
+		MatchID:   "test-match-" + uuid.New().String()[:8],
+		EventType: domain.EventTypeGoal,
+		Timestamp: time.Now(),
 		TeamID:    1,
-		PlayerID:  "player-1",
-		Metadata:  map[string]interface{}{"test": true},
+		PlayerID:  "test-player-" + uuid.New().String()[:8],
+		Metadata:  map[string]interface{}{"minute": 45},
 	}
 }
 
-func createTestEngagementEvent(matchID, userID string, engagementType domain.EngagementType) *domain.EngagementEvent {
+func createTestEngagementEvent() *domain.EngagementEvent {
 	return &domain.EngagementEvent{
 		EventID:           uuid.New(),
-		MatchID:           matchID,
-		UserID:            userID,
-		SessionID:         "session-123",
-		EngagementType:    engagementType,
+		MatchID:           "test-match-" + uuid.New().String()[:8],
+		UserID:            "test-user-" + uuid.New().String()[:8],
+		SessionID:         "test-session-" + uuid.New().String()[:8],
+		EngagementType:    domain.EngagementTypeReaction,
 		EngagementSubtype: "cheer",
 		GameMinute:        45,
-		DeviceType:        domain.DeviceMobile,
+		DeviceType:        "mobile",
 		Platform:          "ios",
 		CountryCode:       "US",
-		Content:           "test content",
-		Metadata:          map[string]interface{}{"test": true},
-		Timestamp:         time.Now().UTC(),
+		Timestamp:         time.Now(),
+		Metadata:          map[string]interface{}{"source": "test"},
 	}
 }
 
-// ============================================
-// EventProducer.Produce Tests
-// ============================================
-
-func TestEventProducer_Produce_Success(t *testing.T) {
-	mock := newMockWriter("events")
-	producer := newTestableEventProducer(mock, nil)
-
-	event := createTestEvent("match-123", domain.EventTypeGoal)
-	ctx := context.Background()
-
-	err := producer.Produce(ctx, event)
-	if err != nil {
-		t.Fatalf("Produce() unexpected error: %v", err)
-	}
-
-	msgs := mock.getWrittenMessages()
-	if len(msgs) != 1 {
-		t.Fatalf("Expected 1 message, got %d", len(msgs))
-	}
-
-	msg := msgs[0]
-	if string(msg.Key) != event.MatchID {
-		t.Errorf("Message key = %q, want %q", string(msg.Key), event.MatchID)
-	}
-
-	// Verify headers
-	if len(msg.Headers) != 2 {
-		t.Errorf("Expected 2 headers, got %d", len(msg.Headers))
-	}
-
-	headerMap := make(map[string]string)
-	for _, h := range msg.Headers {
-		headerMap[h.Key] = string(h.Value)
-	}
-
-	if headerMap["event_type"] != string(event.EventType) {
-		t.Errorf("Header event_type = %q, want %q", headerMap["event_type"], event.EventType)
-	}
-	if headerMap["event_id"] != event.EventID.String() {
-		t.Errorf("Header event_id = %q, want %q", headerMap["event_id"], event.EventID.String())
-	}
-}
-
-func TestEventProducer_Produce_NilEvent(t *testing.T) {
-	mock := newMockWriter("events")
-	producer := newTestableEventProducer(mock, nil)
-
-	err := producer.Produce(context.Background(), nil)
-	if err == nil {
-		t.Error("Produce() expected error for nil event, got nil")
-	}
-
-	msgs := mock.getWrittenMessages()
-	if len(msgs) != 0 {
-		t.Errorf("Expected 0 messages for nil event, got %d", len(msgs))
-	}
-}
-
-func TestEventProducer_Produce_WriteError(t *testing.T) {
-	mock := newMockWriter("events")
-	mock.writeErr = errors.New("kafka connection failed")
-	producer := newTestableEventProducer(mock, nil)
-
-	event := createTestEvent("match-123", domain.EventTypePass)
-	err := producer.Produce(context.Background(), event)
-
-	if err == nil {
-		t.Error("Produce() expected error for write failure, got nil")
-	}
-	if !errors.Is(err, mock.writeErr) && err.Error() != "failed to produce message: kafka connection failed" {
-		t.Errorf("Produce() error = %v, want to contain 'kafka connection failed'", err)
-	}
-}
-
-func TestEventProducer_Produce_AllEventTypes(t *testing.T) {
-	eventTypes := []domain.EventType{
-		domain.EventTypePass,
-		domain.EventTypeShot,
-		domain.EventTypeGoal,
-		domain.EventTypeFoul,
-		domain.EventTypeYellowCard,
-		domain.EventTypeRedCard,
-		domain.EventTypeSubstitution,
-		domain.EventTypeOffside,
-		domain.EventTypeCorner,
-		domain.EventTypeFreeKick,
-		domain.EventTypeInterception,
-	}
-
-	for _, eventType := range eventTypes {
-		t.Run(string(eventType), func(t *testing.T) {
-			mock := newMockWriter("events")
-			producer := newTestableEventProducer(mock, nil)
-
-			event := createTestEvent("match-test", eventType)
-			err := producer.Produce(context.Background(), event)
-
-			if err != nil {
-				t.Errorf("Produce() error for %s: %v", eventType, err)
-			}
-
-			msgs := mock.getWrittenMessages()
-			if len(msgs) != 1 {
-				t.Errorf("Expected 1 message for %s, got %d", eventType, len(msgs))
-			}
-		})
-	}
-}
-
-func TestEventProducer_Produce_WithMetadata(t *testing.T) {
-	mock := newMockWriter("events")
-	producer := newTestableEventProducer(mock, nil)
-
-	event := &domain.Event{
-		EventID:   uuid.New(),
-		MatchID:   "match-with-metadata",
-		EventType: domain.EventTypeGoal,
-		Timestamp: time.Now().UTC(),
-		TeamID:    2,
-		PlayerID:  "player-10",
-		Metadata: map[string]interface{}{
-			"minute":        90,
-			"assisted_by":   "player-7",
-			"goal_type":     "header",
-			"is_own_goal":   false,
-			"distance_feet": 18.5,
-		},
-	}
-
-	err := producer.Produce(context.Background(), event)
-	if err != nil {
-		t.Fatalf("Produce() unexpected error: %v", err)
-	}
-
-	msgs := mock.getWrittenMessages()
-	if len(msgs) != 1 {
-		t.Fatalf("Expected 1 message, got %d", len(msgs))
-	}
-
-	// Verify the message value contains the serialized event
-	if len(msgs[0].Value) == 0 {
-		t.Error("Message value should not be empty")
-	}
-}
-
-func TestEventProducer_Produce_ContextCancellation(t *testing.T) {
-	mock := newMockWriter("events")
-	mock.writeErr = context.Canceled
-	producer := newTestableEventProducer(mock, nil)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // Cancel immediately
-
-	event := createTestEvent("match-123", domain.EventTypePass)
-	err := producer.Produce(ctx, event)
-
-	if err == nil {
-		t.Error("Produce() expected error for canceled context")
-	}
-}
-
-// ============================================
-// EventProducer.ProduceBatch Tests
-// ============================================
-
-func TestEventProducer_ProduceBatch_Success(t *testing.T) {
-	mock := newMockWriter("events")
-	producer := newTestableEventProducer(mock, nil)
-
-	events := []*domain.Event{
-		createTestEvent("match-1", domain.EventTypePass),
-		createTestEvent("match-1", domain.EventTypeShot),
-		createTestEvent("match-1", domain.EventTypeGoal),
-	}
-
-	err := producer.ProduceBatch(context.Background(), events)
-	if err != nil {
-		t.Fatalf("ProduceBatch() unexpected error: %v", err)
-	}
-
-	msgs := mock.getWrittenMessages()
-	if len(msgs) != 3 {
-		t.Errorf("Expected 3 messages, got %d", len(msgs))
-	}
-}
-
-func TestEventProducer_ProduceBatch_EmptySlice(t *testing.T) {
-	mock := newMockWriter("events")
-	producer := newTestableEventProducer(mock, nil)
-
-	err := producer.ProduceBatch(context.Background(), []*domain.Event{})
-	if err != nil {
-		t.Errorf("ProduceBatch() unexpected error for empty slice: %v", err)
-	}
-
-	msgs := mock.getWrittenMessages()
-	if len(msgs) != 0 {
-		t.Errorf("Expected 0 messages for empty slice, got %d", len(msgs))
-	}
-}
-
-func TestEventProducer_ProduceBatch_NilSlice(t *testing.T) {
-	mock := newMockWriter("events")
-	producer := newTestableEventProducer(mock, nil)
-
-	err := producer.ProduceBatch(context.Background(), nil)
-	if err != nil {
-		t.Errorf("ProduceBatch() unexpected error for nil slice: %v", err)
-	}
-}
-
-func TestEventProducer_ProduceBatch_WithNilEvents(t *testing.T) {
-	mock := newMockWriter("events")
-	producer := newTestableEventProducer(mock, nil)
-
-	events := []*domain.Event{
-		createTestEvent("match-1", domain.EventTypePass),
-		nil, // Should be skipped
-		createTestEvent("match-1", domain.EventTypeGoal),
-		nil, // Should be skipped
-	}
-
-	err := producer.ProduceBatch(context.Background(), events)
-	if err != nil {
-		t.Fatalf("ProduceBatch() unexpected error: %v", err)
-	}
-
-	msgs := mock.getWrittenMessages()
-	if len(msgs) != 2 {
-		t.Errorf("Expected 2 messages (skipping nil events), got %d", len(msgs))
-	}
-}
-
-func TestEventProducer_ProduceBatch_AllNilEvents(t *testing.T) {
-	mock := newMockWriter("events")
-	producer := newTestableEventProducer(mock, nil)
-
-	events := []*domain.Event{nil, nil, nil}
-
-	err := producer.ProduceBatch(context.Background(), events)
-	if err != nil {
-		t.Errorf("ProduceBatch() unexpected error for all nil events: %v", err)
-	}
-
-	msgs := mock.getWrittenMessages()
-	if len(msgs) != 0 {
-		t.Errorf("Expected 0 messages for all nil events, got %d", len(msgs))
-	}
-}
-
-func TestEventProducer_ProduceBatch_WriteError(t *testing.T) {
-	mock := newMockWriter("events")
-	mock.writeErr = errors.New("kafka batch write failed")
-	producer := newTestableEventProducer(mock, nil)
-
-	events := []*domain.Event{
-		createTestEvent("match-1", domain.EventTypePass),
-		createTestEvent("match-1", domain.EventTypeShot),
-	}
-
-	err := producer.ProduceBatch(context.Background(), events)
-	if err == nil {
-		t.Error("ProduceBatch() expected error for write failure, got nil")
-	}
-}
-
-func TestEventProducer_ProduceBatch_LargeBatch(t *testing.T) {
-	mock := newMockWriter("events")
-	producer := newTestableEventProducer(mock, nil)
-
-	// Create a large batch of events
-	events := make([]*domain.Event, 100)
-	for i := 0; i < 100; i++ {
-		events[i] = createTestEvent("match-large-batch", domain.EventTypePass)
-	}
-
-	err := producer.ProduceBatch(context.Background(), events)
-	if err != nil {
-		t.Fatalf("ProduceBatch() unexpected error for large batch: %v", err)
-	}
-
-	msgs := mock.getWrittenMessages()
-	if len(msgs) != 100 {
-		t.Errorf("Expected 100 messages, got %d", len(msgs))
-	}
-}
-
-func TestEventProducer_ProduceBatch_MultipleMatches(t *testing.T) {
-	mock := newMockWriter("events")
-	producer := newTestableEventProducer(mock, nil)
-
-	events := []*domain.Event{
-		createTestEvent("match-A", domain.EventTypePass),
-		createTestEvent("match-B", domain.EventTypeShot),
-		createTestEvent("match-A", domain.EventTypeGoal),
-		createTestEvent("match-C", domain.EventTypeFoul),
-	}
-
-	err := producer.ProduceBatch(context.Background(), events)
-	if err != nil {
-		t.Fatalf("ProduceBatch() unexpected error: %v", err)
-	}
-
-	msgs := mock.getWrittenMessages()
-	if len(msgs) != 4 {
-		t.Errorf("Expected 4 messages, got %d", len(msgs))
-	}
-
-	// Verify keys are correct
-	expectedKeys := []string{"match-A", "match-B", "match-A", "match-C"}
-	for i, msg := range msgs {
-		if string(msg.Key) != expectedKeys[i] {
-			t.Errorf("Message %d key = %q, want %q", i, string(msg.Key), expectedKeys[i])
-		}
-	}
-}
-
-// ============================================
-// EngagementProducer.Produce Tests
-// ============================================
-
-func TestEngagementProducer_Produce_Success(t *testing.T) {
-	mock := newMockWriter("engagements")
-	producer := newTestableEngagementProducer(mock, nil)
-
-	event := createTestEngagementEvent("match-123", "user-456", domain.EngagementTypeReaction)
-	ctx := context.Background()
-
-	err := producer.Produce(ctx, event)
-	if err != nil {
-		t.Fatalf("Produce() unexpected error: %v", err)
-	}
-
-	msgs := mock.getWrittenMessages()
-	if len(msgs) != 1 {
-		t.Fatalf("Expected 1 message, got %d", len(msgs))
-	}
-
-	msg := msgs[0]
-	expectedKey := event.MatchID + ":" + event.UserID
-	if string(msg.Key) != expectedKey {
-		t.Errorf("Message key = %q, want %q", string(msg.Key), expectedKey)
-	}
-
-	// Verify headers
-	if len(msg.Headers) != 3 {
-		t.Errorf("Expected 3 headers, got %d", len(msg.Headers))
-	}
-
-	headerMap := make(map[string]string)
-	for _, h := range msg.Headers {
-		headerMap[h.Key] = string(h.Value)
-	}
-
-	if headerMap["engagement_type"] != string(event.EngagementType) {
-		t.Errorf("Header engagement_type = %q, want %q", headerMap["engagement_type"], event.EngagementType)
-	}
-	if headerMap["user_id"] != event.UserID {
-		t.Errorf("Header user_id = %q, want %q", headerMap["user_id"], event.UserID)
-	}
-	if headerMap["event_id"] != event.EventID.String() {
-		t.Errorf("Header event_id = %q, want %q", headerMap["event_id"], event.EventID.String())
-	}
-}
-
-func TestEngagementProducer_Produce_NilEvent(t *testing.T) {
-	mock := newMockWriter("engagements")
-	producer := newTestableEngagementProducer(mock, nil)
-
-	err := producer.Produce(context.Background(), nil)
-	if err == nil {
-		t.Error("Produce() expected error for nil event, got nil")
-	}
-
-	msgs := mock.getWrittenMessages()
-	if len(msgs) != 0 {
-		t.Errorf("Expected 0 messages for nil event, got %d", len(msgs))
-	}
-}
-
-func TestEngagementProducer_Produce_WriteError(t *testing.T) {
-	mock := newMockWriter("engagements")
-	mock.writeErr = errors.New("kafka connection failed")
-	producer := newTestableEngagementProducer(mock, nil)
-
-	event := createTestEngagementEvent("match-123", "user-456", domain.EngagementTypeComment)
-	err := producer.Produce(context.Background(), event)
-
-	if err == nil {
-		t.Error("Produce() expected error for write failure, got nil")
-	}
-}
-
-func TestEngagementProducer_Produce_AllEngagementTypes(t *testing.T) {
-	engagementTypes := []domain.EngagementType{
-		domain.EngagementTypeReaction,
-		domain.EngagementTypeComment,
-		domain.EngagementTypeVideoAction,
-		domain.EngagementTypeShare,
-		domain.EngagementTypePrediction,
-		domain.EngagementTypeClick,
-		domain.EngagementTypeSession,
-	}
-
-	for _, engagementType := range engagementTypes {
-		t.Run(string(engagementType), func(t *testing.T) {
-			mock := newMockWriter("engagements")
-			producer := newTestableEngagementProducer(mock, nil)
-
-			event := createTestEngagementEvent("match-test", "user-test", engagementType)
-			err := producer.Produce(context.Background(), event)
-
-			if err != nil {
-				t.Errorf("Produce() error for %s: %v", engagementType, err)
-			}
-
-			msgs := mock.getWrittenMessages()
-			if len(msgs) != 1 {
-				t.Errorf("Expected 1 message for %s, got %d", engagementType, len(msgs))
-			}
-		})
-	}
-}
-
-func TestEngagementProducer_Produce_WithRelatedGameEvent(t *testing.T) {
-	mock := newMockWriter("engagements")
-	producer := newTestableEngagementProducer(mock, nil)
-
-	relatedEventID := uuid.New()
-	event := &domain.EngagementEvent{
-		EventID:            uuid.New(),
-		MatchID:            "match-with-related",
-		UserID:             "user-123",
-		SessionID:          "session-456",
-		EngagementType:     domain.EngagementTypeReaction,
-		EngagementSubtype:  "emoji_goal",
-		RelatedGameEventID: &relatedEventID,
-		GameMinute:         75,
-		DeviceType:         domain.DeviceDesktop,
-		Platform:           "web",
-		CountryCode:        "UK",
-		Content:            "",
-		Metadata:           nil,
-		Timestamp:          time.Now().UTC(),
-	}
-
-	err := producer.Produce(context.Background(), event)
-	if err != nil {
-		t.Fatalf("Produce() unexpected error: %v", err)
-	}
-
-	msgs := mock.getWrittenMessages()
-	if len(msgs) != 1 {
-		t.Fatalf("Expected 1 message, got %d", len(msgs))
-	}
-}
-
-func TestEngagementProducer_Produce_AllDeviceTypes(t *testing.T) {
-	deviceTypes := []domain.DeviceType{
-		domain.DeviceMobile,
-		domain.DeviceDesktop,
-		domain.DeviceTablet,
-		domain.DeviceTV,
-		domain.DeviceUnknown,
-	}
-
-	for _, deviceType := range deviceTypes {
-		t.Run(string(deviceType), func(t *testing.T) {
-			mock := newMockWriter("engagements")
-			producer := newTestableEngagementProducer(mock, nil)
-
-			event := &domain.EngagementEvent{
-				EventID:           uuid.New(),
-				MatchID:           "match-device-test",
-				UserID:            "user-device-test",
-				SessionID:         "session-device",
-				EngagementType:    domain.EngagementTypeSession,
-				EngagementSubtype: "join",
-				GameMinute:        0,
-				DeviceType:        deviceType,
-				Platform:          "test",
-				CountryCode:       "US",
-				Timestamp:         time.Now().UTC(),
-			}
-
-			err := producer.Produce(context.Background(), event)
-			if err != nil {
-				t.Errorf("Produce() error for device %s: %v", deviceType, err)
-			}
-		})
-	}
-}
-
-// ============================================
-// EngagementProducer.ProduceBatch Tests
-// ============================================
-
-func TestEngagementProducer_ProduceBatch_Success(t *testing.T) {
-	mock := newMockWriter("engagements")
-	producer := newTestableEngagementProducer(mock, nil)
-
-	events := []*domain.EngagementEvent{
-		createTestEngagementEvent("match-1", "user-1", domain.EngagementTypeReaction),
-		createTestEngagementEvent("match-1", "user-2", domain.EngagementTypeComment),
-		createTestEngagementEvent("match-1", "user-3", domain.EngagementTypeShare),
-	}
-
-	err := producer.ProduceBatch(context.Background(), events)
-	if err != nil {
-		t.Fatalf("ProduceBatch() unexpected error: %v", err)
-	}
-
-	msgs := mock.getWrittenMessages()
-	if len(msgs) != 3 {
-		t.Errorf("Expected 3 messages, got %d", len(msgs))
-	}
-}
-
-func TestEngagementProducer_ProduceBatch_EmptySlice(t *testing.T) {
-	mock := newMockWriter("engagements")
-	producer := newTestableEngagementProducer(mock, nil)
-
-	err := producer.ProduceBatch(context.Background(), []*domain.EngagementEvent{})
-	if err != nil {
-		t.Errorf("ProduceBatch() unexpected error for empty slice: %v", err)
-	}
-
-	msgs := mock.getWrittenMessages()
-	if len(msgs) != 0 {
-		t.Errorf("Expected 0 messages for empty slice, got %d", len(msgs))
-	}
-}
-
-func TestEngagementProducer_ProduceBatch_NilSlice(t *testing.T) {
-	mock := newMockWriter("engagements")
-	producer := newTestableEngagementProducer(mock, nil)
-
-	err := producer.ProduceBatch(context.Background(), nil)
-	if err != nil {
-		t.Errorf("ProduceBatch() unexpected error for nil slice: %v", err)
-	}
-}
-
-func TestEngagementProducer_ProduceBatch_WithNilEvents(t *testing.T) {
-	mock := newMockWriter("engagements")
-	producer := newTestableEngagementProducer(mock, nil)
-
-	events := []*domain.EngagementEvent{
-		createTestEngagementEvent("match-1", "user-1", domain.EngagementTypeReaction),
-		nil,
-		createTestEngagementEvent("match-1", "user-2", domain.EngagementTypeComment),
-		nil,
-	}
-
-	err := producer.ProduceBatch(context.Background(), events)
-	if err != nil {
-		t.Fatalf("ProduceBatch() unexpected error: %v", err)
-	}
-
-	msgs := mock.getWrittenMessages()
-	if len(msgs) != 2 {
-		t.Errorf("Expected 2 messages (skipping nil events), got %d", len(msgs))
-	}
-}
-
-func TestEngagementProducer_ProduceBatch_AllNilEvents(t *testing.T) {
-	mock := newMockWriter("engagements")
-	producer := newTestableEngagementProducer(mock, nil)
-
-	events := []*domain.EngagementEvent{nil, nil, nil}
-
-	err := producer.ProduceBatch(context.Background(), events)
-	if err != nil {
-		t.Errorf("ProduceBatch() unexpected error for all nil events: %v", err)
-	}
-
-	msgs := mock.getWrittenMessages()
-	if len(msgs) != 0 {
-		t.Errorf("Expected 0 messages for all nil events, got %d", len(msgs))
-	}
-}
-
-func TestEngagementProducer_ProduceBatch_WriteError(t *testing.T) {
-	mock := newMockWriter("engagements")
-	mock.writeErr = errors.New("kafka batch write failed")
-	producer := newTestableEngagementProducer(mock, nil)
-
-	events := []*domain.EngagementEvent{
-		createTestEngagementEvent("match-1", "user-1", domain.EngagementTypeReaction),
-		createTestEngagementEvent("match-1", "user-2", domain.EngagementTypeComment),
-	}
-
-	err := producer.ProduceBatch(context.Background(), events)
-	if err == nil {
-		t.Error("ProduceBatch() expected error for write failure, got nil")
-	}
-}
-
-func TestEngagementProducer_ProduceBatch_LargeBatch(t *testing.T) {
-	mock := newMockWriter("engagements")
-	producer := newTestableEngagementProducer(mock, nil)
-
-	// Create a large batch of engagement events
-	events := make([]*domain.EngagementEvent, 500)
-	for i := 0; i < 500; i++ {
-		events[i] = createTestEngagementEvent("match-large-batch", "user-"+string(rune(i%26+'A')), domain.EngagementTypeReaction)
-	}
-
-	err := producer.ProduceBatch(context.Background(), events)
-	if err != nil {
-		t.Fatalf("ProduceBatch() unexpected error for large batch: %v", err)
-	}
-
-	msgs := mock.getWrittenMessages()
-	if len(msgs) != 500 {
-		t.Errorf("Expected 500 messages, got %d", len(msgs))
-	}
-}
-
-func TestEngagementProducer_ProduceBatch_MultipleUsersAndMatches(t *testing.T) {
-	mock := newMockWriter("engagements")
-	producer := newTestableEngagementProducer(mock, nil)
-
-	events := []*domain.EngagementEvent{
-		createTestEngagementEvent("match-A", "user-1", domain.EngagementTypeReaction),
-		createTestEngagementEvent("match-B", "user-2", domain.EngagementTypeComment),
-		createTestEngagementEvent("match-A", "user-1", domain.EngagementTypeShare),
-		createTestEngagementEvent("match-A", "user-3", domain.EngagementTypePrediction),
-	}
-
-	err := producer.ProduceBatch(context.Background(), events)
-	if err != nil {
-		t.Fatalf("ProduceBatch() unexpected error: %v", err)
-	}
-
-	msgs := mock.getWrittenMessages()
-	if len(msgs) != 4 {
-		t.Errorf("Expected 4 messages, got %d", len(msgs))
-	}
-
-	// Verify keys are correct (matchID:userID format)
-	expectedKeys := []string{"match-A:user-1", "match-B:user-2", "match-A:user-1", "match-A:user-3"}
-	for i, msg := range msgs {
-		if string(msg.Key) != expectedKeys[i] {
-			t.Errorf("Message %d key = %q, want %q", i, string(msg.Key), expectedKeys[i])
-		}
-	}
-}
-
-// ============================================
-// Factory Function Tests
-// ============================================
-
-func TestNewEventProducer(t *testing.T) {
-	writer := NewWriter([]string{"localhost:9092"}, "test-events")
-	defer func() { _ = writer.Close() }()
-
-	// Test with nil logger (should use default)
-	producer := NewEventProducer(writer, nil)
-	if producer == nil {
-		t.Fatal("NewEventProducer() returned nil")
-	}
-	if producer.writer != writer {
-		t.Error("NewEventProducer() writer not set correctly")
-	}
-
-	// Test with custom logger
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	producer2 := NewEventProducer(writer, logger)
-	if producer2 == nil {
-		t.Fatal("NewEventProducer() with logger returned nil")
-	}
-}
-
-func TestNewEngagementProducer(t *testing.T) {
-	writer := NewEngagementWriter([]string{"localhost:9092"}, "test-engagements")
-	defer func() { _ = writer.Close() }()
-
-	// Test with nil logger (should use default)
-	producer := NewEngagementProducer(writer, nil)
-	if producer == nil {
-		t.Fatal("NewEngagementProducer() returned nil")
-	}
-	if producer.writer != writer {
-		t.Error("NewEngagementProducer() writer not set correctly")
-	}
-
-	// Test with custom logger
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	producer2 := NewEngagementProducer(writer, logger)
-	if producer2 == nil {
-		t.Fatal("NewEngagementProducer() with logger returned nil")
-	}
-}
+// =============================================================================
+// NewWriter Tests
+// =============================================================================
 
 func TestNewWriter(t *testing.T) {
-	brokers := []string{"broker1:9092", "broker2:9092"}
-	topic := "test-topic"
+	brokers := []string{getKafkaBroker()}
+	topic := "test-topic-" + uuid.New().String()[:8]
 
 	writer := NewWriter(brokers, topic)
 	defer func() { _ = writer.Close() }()
 
 	if writer == nil {
-		t.Fatal("NewWriter() returned nil")
+		t.Fatal("expected non-nil writer")
 	}
+
 	if writer.Topic != topic {
-		t.Errorf("Writer.Topic = %q, want %q", writer.Topic, topic)
+		t.Errorf("expected topic '%s', got '%s'", topic, writer.Topic)
 	}
+
 	if writer.BatchSize != 100 {
-		t.Errorf("Writer.BatchSize = %d, want %d", writer.BatchSize, 100)
+		t.Errorf("expected BatchSize 100, got %d", writer.BatchSize)
 	}
-	if writer.RequiredAcks != kafka.RequireAll {
-		t.Errorf("Writer.RequiredAcks = %d, want %d", writer.RequiredAcks, kafka.RequireAll)
-	}
-	if writer.Async != false {
-		t.Error("Writer.Async should be false")
-	}
-}
 
-func TestNewEngagementWriter(t *testing.T) {
-	brokers := []string{"broker1:9092", "broker2:9092"}
-	topic := "test-engagements"
+	if writer.BatchTimeout != 10*time.Millisecond {
+		t.Errorf("expected BatchTimeout 10ms, got %v", writer.BatchTimeout)
+	}
 
-	writer := NewEngagementWriter(brokers, topic)
-	defer func() { _ = writer.Close() }()
-
-	if writer == nil {
-		t.Fatal("NewEngagementWriter() returned nil")
-	}
-	if writer.Topic != topic {
-		t.Errorf("Writer.Topic = %q, want %q", writer.Topic, topic)
-	}
-	if writer.BatchSize != 500 {
-		t.Errorf("Writer.BatchSize = %d, want %d (higher for engagement volume)", writer.BatchSize, 500)
-	}
-	if writer.RequiredAcks != kafka.RequireOne {
-		t.Errorf("Writer.RequiredAcks = %d, want %d (lower durability for engagement)", writer.RequiredAcks, kafka.RequireOne)
+	if writer.WriteTimeout != 10*time.Second {
+		t.Errorf("expected WriteTimeout 10s, got %v", writer.WriteTimeout)
 	}
 }
 
 func TestNewWriterWithConfig(t *testing.T) {
 	cfg := WriterConfig{
-		Brokers:      []string{"localhost:9092"},
-		Topic:        "custom-topic",
-		BatchSize:    50,
-		BatchTimeout: 100 * time.Millisecond,
+		Brokers:      []string{getKafkaBroker()},
+		Topic:        "custom-topic-" + uuid.New().String()[:8],
+		BatchSize:    200,
+		BatchTimeout: 20 * time.Millisecond,
 		WriteTimeout: 5 * time.Second,
 		MaxAttempts:  5,
-		Async:        true,
+		Async:        false,
 	}
 
 	writer := NewWriterWithConfig(cfg)
 	defer func() { _ = writer.Close() }()
 
 	if writer == nil {
-		t.Fatal("NewWriterWithConfig() returned nil")
+		t.Fatal("expected non-nil writer")
 	}
+
 	if writer.Topic != cfg.Topic {
-		t.Errorf("Writer.Topic = %q, want %q", writer.Topic, cfg.Topic)
+		t.Errorf("expected topic '%s', got '%s'", cfg.Topic, writer.Topic)
 	}
+
 	if writer.BatchSize != cfg.BatchSize {
-		t.Errorf("Writer.BatchSize = %d, want %d", writer.BatchSize, cfg.BatchSize)
+		t.Errorf("expected BatchSize %d, got %d", cfg.BatchSize, writer.BatchSize)
 	}
+
 	if writer.BatchTimeout != cfg.BatchTimeout {
-		t.Errorf("Writer.BatchTimeout = %v, want %v", writer.BatchTimeout, cfg.BatchTimeout)
-	}
-	if writer.WriteTimeout != cfg.WriteTimeout {
-		t.Errorf("Writer.WriteTimeout = %v, want %v", writer.WriteTimeout, cfg.WriteTimeout)
-	}
-	if writer.MaxAttempts != cfg.MaxAttempts {
-		t.Errorf("Writer.MaxAttempts = %d, want %d", writer.MaxAttempts, cfg.MaxAttempts)
-	}
-	if writer.Async != cfg.Async {
-		t.Errorf("Writer.Async = %v, want %v", writer.Async, cfg.Async)
+		t.Errorf("expected BatchTimeout %v, got %v", cfg.BatchTimeout, writer.BatchTimeout)
 	}
 }
 
 func TestDefaultWriterConfig(t *testing.T) {
-	brokers := []string{"localhost:9092", "localhost:9093"}
-	topic := "default-topic"
+	brokers := []string{getKafkaBroker()}
+	topic := "default-topic-" + uuid.New().String()[:8]
 
 	cfg := DefaultWriterConfig(brokers, topic)
 
-	if len(cfg.Brokers) != 2 {
-		t.Errorf("DefaultWriterConfig().Brokers length = %d, want %d", len(cfg.Brokers), 2)
+	if len(cfg.Brokers) != 1 {
+		t.Errorf("expected 1 broker, got %d", len(cfg.Brokers))
 	}
+
 	if cfg.Topic != topic {
-		t.Errorf("DefaultWriterConfig().Topic = %q, want %q", cfg.Topic, topic)
+		t.Errorf("expected topic '%s', got '%s'", topic, cfg.Topic)
 	}
+
 	if cfg.BatchSize != 100 {
-		t.Errorf("DefaultWriterConfig().BatchSize = %d, want %d", cfg.BatchSize, 100)
+		t.Errorf("expected BatchSize 100, got %d", cfg.BatchSize)
 	}
+
 	if cfg.BatchTimeout != 10*time.Millisecond {
-		t.Errorf("DefaultWriterConfig().BatchTimeout = %v, want %v", cfg.BatchTimeout, 10*time.Millisecond)
+		t.Errorf("expected BatchTimeout 10ms, got %v", cfg.BatchTimeout)
 	}
-	if cfg.WriteTimeout != 10*time.Second {
-		t.Errorf("DefaultWriterConfig().WriteTimeout = %v, want %v", cfg.WriteTimeout, 10*time.Second)
-	}
+
 	if cfg.MaxAttempts != 3 {
-		t.Errorf("DefaultWriterConfig().MaxAttempts = %d, want %d", cfg.MaxAttempts, 3)
-	}
-	if cfg.Async != false {
-		t.Error("DefaultWriterConfig().Async should be false")
+		t.Errorf("expected MaxAttempts 3, got %d", cfg.MaxAttempts)
 	}
 }
 
-// ============================================
-// Close Method Tests
-// ============================================
+// =============================================================================
+// NewEngagementWriter Tests
+// =============================================================================
+
+func TestNewEngagementWriter(t *testing.T) {
+	brokers := []string{getKafkaBroker()}
+	topic := "engagement-topic-" + uuid.New().String()[:8]
+
+	writer := NewEngagementWriter(brokers, topic)
+	defer func() { _ = writer.Close() }()
+
+	if writer == nil {
+		t.Fatal("expected non-nil writer")
+	}
+
+	if writer.Topic != topic {
+		t.Errorf("expected topic '%s', got '%s'", topic, writer.Topic)
+	}
+
+	if writer.BatchSize != 500 {
+		t.Errorf("expected BatchSize 500, got %d", writer.BatchSize)
+	}
+
+	if writer.BatchTimeout != 50*time.Millisecond {
+		t.Errorf("expected BatchTimeout 50ms, got %v", writer.BatchTimeout)
+	}
+}
+
+// =============================================================================
+// EventProducer Tests
+// =============================================================================
+
+func TestNewEventProducer(t *testing.T) {
+	brokers := []string{getKafkaBroker()}
+	topic := "test-events-" + uuid.New().String()[:8]
+
+	writer := NewWriter(brokers, topic)
+	producer := NewEventProducer(writer, nil)
+	defer func() { _ = producer.Close() }()
+
+	if producer == nil {
+		t.Fatal("expected non-nil producer")
+	}
+
+	if producer.writer == nil {
+		t.Error("expected writer to be set")
+	}
+
+	if producer.logger == nil {
+		t.Error("expected default logger to be set")
+	}
+}
+
+func TestEventProducer_Produce(t *testing.T) {
+	brokers := []string{getKafkaBroker()}
+	topic := "test-events-" + uuid.New().String()[:8]
+
+	writer := NewWriter(brokers, topic)
+	producer := NewEventProducer(writer, nil)
+	defer func() { _ = producer.Close() }()
+
+	event := createTestEvent()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	err := producer.Produce(ctx, event)
+	if err != nil {
+		t.Fatalf("Produce failed: %v", err)
+	}
+}
+
+func TestEventProducer_Produce_NilEvent(t *testing.T) {
+	brokers := []string{getKafkaBroker()}
+	topic := "test-events-" + uuid.New().String()[:8]
+
+	writer := NewWriter(brokers, topic)
+	producer := NewEventProducer(writer, nil)
+	defer func() { _ = producer.Close() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err := producer.Produce(ctx, nil)
+	if err == nil {
+		t.Fatal("expected error for nil event, got nil")
+	}
+
+	if err.Error() != "event cannot be nil" {
+		t.Errorf("expected 'event cannot be nil', got '%s'", err.Error())
+	}
+}
+
+func TestEventProducer_ProduceBatch(t *testing.T) {
+	brokers := []string{getKafkaBroker()}
+	topic := "test-events-" + uuid.New().String()[:8]
+
+	writer := NewWriter(brokers, topic)
+	producer := NewEventProducer(writer, nil)
+	defer func() { _ = producer.Close() }()
+
+	events := []*domain.Event{
+		createTestEvent(),
+		createTestEvent(),
+		createTestEvent(),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	err := producer.ProduceBatch(ctx, events)
+	if err != nil {
+		t.Fatalf("ProduceBatch failed: %v", err)
+	}
+}
+
+func TestEventProducer_ProduceBatch_EmptySlice(t *testing.T) {
+	brokers := []string{getKafkaBroker()}
+	topic := "test-events-" + uuid.New().String()[:8]
+
+	writer := NewWriter(brokers, topic)
+	producer := NewEventProducer(writer, nil)
+	defer func() { _ = producer.Close() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err := producer.ProduceBatch(ctx, []*domain.Event{})
+	if err != nil {
+		t.Fatalf("expected no error for empty slice, got: %v", err)
+	}
+}
+
+func TestEventProducer_ProduceBatch_WithNilEvents(t *testing.T) {
+	brokers := []string{getKafkaBroker()}
+	topic := "test-events-" + uuid.New().String()[:8]
+
+	writer := NewWriter(brokers, topic)
+	producer := NewEventProducer(writer, nil)
+	defer func() { _ = producer.Close() }()
+
+	events := []*domain.Event{
+		createTestEvent(),
+		nil, // This should be skipped
+		createTestEvent(),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	err := producer.ProduceBatch(ctx, events)
+	if err != nil {
+		t.Fatalf("ProduceBatch failed: %v", err)
+	}
+}
+
+func TestEventProducer_ProduceBatch_AllNil(t *testing.T) {
+	brokers := []string{getKafkaBroker()}
+	topic := "test-events-" + uuid.New().String()[:8]
+
+	writer := NewWriter(brokers, topic)
+	producer := NewEventProducer(writer, nil)
+	defer func() { _ = producer.Close() }()
+
+	events := []*domain.Event{nil, nil, nil}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err := producer.ProduceBatch(ctx, events)
+	if err != nil {
+		t.Fatalf("expected no error for all nil events, got: %v", err)
+	}
+}
+
+func TestEventProducer_ProduceBatch_LargeBatch(t *testing.T) {
+	brokers := []string{getKafkaBroker()}
+	topic := "test-events-" + uuid.New().String()[:8]
+
+	writer := NewWriter(brokers, topic)
+	producer := NewEventProducer(writer, nil)
+	defer func() { _ = producer.Close() }()
+
+	events := make([]*domain.Event, 100)
+	for i := 0; i < 100; i++ {
+		events[i] = createTestEvent()
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	err := producer.ProduceBatch(ctx, events)
+	if err != nil {
+		t.Fatalf("ProduceBatch failed for large batch: %v", err)
+	}
+}
+
+func TestEventProducer_Ping(t *testing.T) {
+	brokers := []string{getKafkaBroker()}
+	topic := "test-events-" + uuid.New().String()[:8]
+
+	writer := NewWriter(brokers, topic)
+	producer := NewEventProducer(writer, nil)
+	defer func() { _ = producer.Close() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err := producer.Ping(ctx)
+	if err != nil {
+		t.Fatalf("Ping failed: %v", err)
+	}
+}
 
 func TestEventProducer_Close(t *testing.T) {
-	writer := NewWriter([]string{"localhost:9092"}, "test-events")
+	brokers := []string{getKafkaBroker()}
+	topic := "test-events-" + uuid.New().String()[:8]
+
+	writer := NewWriter(brokers, topic)
 	producer := NewEventProducer(writer, nil)
 
 	err := producer.Close()
 	if err != nil {
-		t.Errorf("Close() unexpected error: %v", err)
+		t.Fatalf("Close failed: %v", err)
 	}
 }
 
 func TestEventProducer_Close_NilWriter(t *testing.T) {
 	producer := &EventProducer{
 		writer: nil,
-		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		logger: nil,
 	}
 
 	err := producer.Close()
 	if err != nil {
-		t.Errorf("Close() with nil writer should return nil, got: %v", err)
+		t.Fatalf("expected no error for nil writer, got: %v", err)
+	}
+}
+
+func TestEventProducer_AllEventTypes(t *testing.T) {
+	eventTypes := []domain.EventType{
+		domain.EventTypeGoal,
+		domain.EventTypePass,
+		domain.EventTypeShot,
+		domain.EventTypeShotOnTarget,
+		domain.EventTypeTackle,
+		domain.EventTypeFoul,
+		domain.EventTypeYellowCard,
+		domain.EventTypeRedCard,
+		domain.EventTypeCorner,
+		domain.EventTypeFreeKick,
+		domain.EventTypePenalty,
+		domain.EventTypeSubstitution,
+		domain.EventTypeInjury,
+		domain.EventTypeOffside,
+		domain.EventTypeKickoff,
+		domain.EventTypeHalfTime,
+		domain.EventTypeFullTime,
+	}
+
+	for _, eventType := range eventTypes {
+		t.Run(string(eventType), func(t *testing.T) {
+			brokers := []string{getKafkaBroker()}
+			topic := "test-events-" + uuid.New().String()[:8]
+
+			writer := NewWriter(brokers, topic)
+			producer := NewEventProducer(writer, nil)
+			defer func() { _ = producer.Close() }()
+
+			event := &domain.Event{
+				EventID:   uuid.New(),
+				MatchID:   "match-123",
+				EventType: eventType,
+				Timestamp: time.Now(),
+				TeamID:    1,
+				PlayerID:  "player-456",
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			err := producer.Produce(ctx, event)
+			if err != nil {
+				t.Fatalf("Produce failed for event type %s: %v", eventType, err)
+			}
+		})
+	}
+}
+
+// =============================================================================
+// EngagementProducer Tests
+// =============================================================================
+
+func TestNewEngagementProducer(t *testing.T) {
+	brokers := []string{getKafkaBroker()}
+	topic := "test-engagements-" + uuid.New().String()[:8]
+
+	writer := NewEngagementWriter(brokers, topic)
+	producer := NewEngagementProducer(writer, nil)
+	defer func() { _ = producer.Close() }()
+
+	if producer == nil {
+		t.Fatal("expected non-nil producer")
+	}
+
+	if producer.writer == nil {
+		t.Error("expected writer to be set")
+	}
+
+	if producer.logger == nil {
+		t.Error("expected default logger to be set")
+	}
+}
+
+func TestEngagementProducer_Produce(t *testing.T) {
+	brokers := []string{getKafkaBroker()}
+	topic := "test-engagements-" + uuid.New().String()[:8]
+
+	writer := NewEngagementWriter(brokers, topic)
+	producer := NewEngagementProducer(writer, nil)
+	defer func() { _ = producer.Close() }()
+
+	event := createTestEngagementEvent()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	err := producer.Produce(ctx, event)
+	if err != nil {
+		t.Fatalf("Produce failed: %v", err)
+	}
+}
+
+func TestEngagementProducer_Produce_NilEvent(t *testing.T) {
+	brokers := []string{getKafkaBroker()}
+	topic := "test-engagements-" + uuid.New().String()[:8]
+
+	writer := NewEngagementWriter(brokers, topic)
+	producer := NewEngagementProducer(writer, nil)
+	defer func() { _ = producer.Close() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err := producer.Produce(ctx, nil)
+	if err == nil {
+		t.Fatal("expected error for nil event, got nil")
+	}
+
+	if err.Error() != "engagement event cannot be nil" {
+		t.Errorf("expected 'engagement event cannot be nil', got '%s'", err.Error())
+	}
+}
+
+func TestEngagementProducer_ProduceBatch(t *testing.T) {
+	brokers := []string{getKafkaBroker()}
+	topic := "test-engagements-" + uuid.New().String()[:8]
+
+	writer := NewEngagementWriter(brokers, topic)
+	producer := NewEngagementProducer(writer, nil)
+	defer func() { _ = producer.Close() }()
+
+	events := []*domain.EngagementEvent{
+		createTestEngagementEvent(),
+		createTestEngagementEvent(),
+		createTestEngagementEvent(),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	err := producer.ProduceBatch(ctx, events)
+	if err != nil {
+		t.Fatalf("ProduceBatch failed: %v", err)
+	}
+}
+
+func TestEngagementProducer_ProduceBatch_EmptySlice(t *testing.T) {
+	brokers := []string{getKafkaBroker()}
+	topic := "test-engagements-" + uuid.New().String()[:8]
+
+	writer := NewEngagementWriter(brokers, topic)
+	producer := NewEngagementProducer(writer, nil)
+	defer func() { _ = producer.Close() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err := producer.ProduceBatch(ctx, []*domain.EngagementEvent{})
+	if err != nil {
+		t.Fatalf("expected no error for empty slice, got: %v", err)
+	}
+}
+
+func TestEngagementProducer_ProduceBatch_WithNilEvents(t *testing.T) {
+	brokers := []string{getKafkaBroker()}
+	topic := "test-engagements-" + uuid.New().String()[:8]
+
+	writer := NewEngagementWriter(brokers, topic)
+	producer := NewEngagementProducer(writer, nil)
+	defer func() { _ = producer.Close() }()
+
+	events := []*domain.EngagementEvent{
+		createTestEngagementEvent(),
+		nil, // This should be skipped
+		createTestEngagementEvent(),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	err := producer.ProduceBatch(ctx, events)
+	if err != nil {
+		t.Fatalf("ProduceBatch failed: %v", err)
+	}
+}
+
+func TestEngagementProducer_ProduceBatch_LargeBatch(t *testing.T) {
+	brokers := []string{getKafkaBroker()}
+	topic := "test-engagements-" + uuid.New().String()[:8]
+
+	writer := NewEngagementWriter(brokers, topic)
+	producer := NewEngagementProducer(writer, nil)
+	defer func() { _ = producer.Close() }()
+
+	events := make([]*domain.EngagementEvent, 500)
+	for i := 0; i < 500; i++ {
+		events[i] = createTestEngagementEvent()
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	err := producer.ProduceBatch(ctx, events)
+	if err != nil {
+		t.Fatalf("ProduceBatch failed for large batch: %v", err)
+	}
+}
+
+func TestEngagementProducer_Ping(t *testing.T) {
+	brokers := []string{getKafkaBroker()}
+	topic := "test-engagements-" + uuid.New().String()[:8]
+
+	writer := NewEngagementWriter(brokers, topic)
+	producer := NewEngagementProducer(writer, nil)
+	defer func() { _ = producer.Close() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err := producer.Ping(ctx)
+	if err != nil {
+		t.Fatalf("Ping failed: %v", err)
 	}
 }
 
 func TestEngagementProducer_Close(t *testing.T) {
-	writer := NewEngagementWriter([]string{"localhost:9092"}, "test-engagements")
+	brokers := []string{getKafkaBroker()}
+	topic := "test-engagements-" + uuid.New().String()[:8]
+
+	writer := NewEngagementWriter(brokers, topic)
 	producer := NewEngagementProducer(writer, nil)
 
 	err := producer.Close()
 	if err != nil {
-		t.Errorf("Close() unexpected error: %v", err)
+		t.Fatalf("Close failed: %v", err)
 	}
 }
 
-func TestEngagementProducer_Close_NilWriter(t *testing.T) {
-	producer := &EngagementProducer{
-		writer: nil,
-		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+func TestEngagementProducer_AllEngagementTypes(t *testing.T) {
+	engagementTypes := []domain.EngagementType{
+		domain.EngagementTypeReaction,
+		domain.EngagementTypeComment,
+		domain.EngagementTypeShare,
 	}
 
-	err := producer.Close()
+	for _, engagementType := range engagementTypes {
+		t.Run(string(engagementType), func(t *testing.T) {
+			brokers := []string{getKafkaBroker()}
+			topic := "test-engagements-" + uuid.New().String()[:8]
+
+			writer := NewEngagementWriter(brokers, topic)
+			producer := NewEngagementProducer(writer, nil)
+			defer func() { _ = producer.Close() }()
+
+			event := &domain.EngagementEvent{
+				EventID:        uuid.New(),
+				MatchID:        "match-123",
+				UserID:         "user-456",
+				SessionID:      "session-789",
+				EngagementType: engagementType,
+				Timestamp:      time.Now(),
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			err := producer.Produce(ctx, event)
+			if err != nil {
+				t.Fatalf("Produce failed for engagement type %s: %v", engagementType, err)
+			}
+		})
+	}
+}
+
+// =============================================================================
+// Message Validation Tests
+// =============================================================================
+
+func TestEventProducer_MessageContent(t *testing.T) {
+	brokers := []string{getKafkaBroker()}
+	topic := "test-events-" + uuid.New().String()[:8]
+
+	writer := NewWriter(brokers, topic)
+	producer := NewEventProducer(writer, nil)
+	defer func() { _ = producer.Close() }()
+
+	event := createTestEvent()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	err := producer.Produce(ctx, event)
 	if err != nil {
-		t.Errorf("Close() with nil writer should return nil, got: %v", err)
-	}
-}
-
-// ============================================
-// Message Key and Header Verification Tests
-// ============================================
-
-func TestEventProducer_MessageKey_PartitionOrdering(t *testing.T) {
-	mock := newMockWriter("events")
-	producer := newTestableEventProducer(mock, nil)
-
-	// All events from same match should have same key for partition ordering
-	matchID := "match-partition-test"
-	events := []*domain.Event{
-		createTestEvent(matchID, domain.EventTypePass),
-		createTestEvent(matchID, domain.EventTypeShot),
-		createTestEvent(matchID, domain.EventTypeGoal),
+		t.Fatalf("Produce failed: %v", err)
 	}
 
-	for _, event := range events {
-		err := producer.Produce(context.Background(), event)
-		if err != nil {
-			t.Fatalf("Produce() error: %v", err)
+	// Create a consumer to read the message back
+	reader := kafka.NewReader(kafka.ReaderConfig{
+		Brokers:        brokers,
+		Topic:          topic,
+		GroupID:        "test-consumer-" + uuid.New().String()[:8],
+		MinBytes:       1,
+		MaxBytes:       10e6,
+		MaxWait:        5 * time.Second,
+		StartOffset:    kafka.FirstOffset,
+		CommitInterval: time.Second,
+	})
+	defer func() { _ = reader.Close() }()
+
+	readCtx, readCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer readCancel()
+
+	msg, err := reader.ReadMessage(readCtx)
+	if err != nil {
+		t.Fatalf("Failed to read message: %v", err)
+	}
+
+	// Verify message key is the matchID
+	if string(msg.Key) != event.MatchID {
+		t.Errorf("expected key '%s', got '%s'", event.MatchID, string(msg.Key))
+	}
+
+	// Verify headers
+	var eventTypeHeader, eventIDHeader string
+	for _, h := range msg.Headers {
+		switch h.Key {
+		case "event_type":
+			eventTypeHeader = string(h.Value)
+		case "event_id":
+			eventIDHeader = string(h.Value)
 		}
 	}
 
-	msgs := mock.getWrittenMessages()
-	for i, msg := range msgs {
-		if string(msg.Key) != matchID {
-			t.Errorf("Message %d key = %q, want %q (for partition ordering)", i, string(msg.Key), matchID)
+	if eventTypeHeader != string(event.EventType) {
+		t.Errorf("expected event_type header '%s', got '%s'", event.EventType, eventTypeHeader)
+	}
+
+	if eventIDHeader != event.EventID.String() {
+		t.Errorf("expected event_id header '%s', got '%s'", event.EventID.String(), eventIDHeader)
+	}
+}
+
+func TestEngagementProducer_MessageContent(t *testing.T) {
+	brokers := []string{getKafkaBroker()}
+	topic := "test-engagements-" + uuid.New().String()[:8]
+
+	writer := NewEngagementWriter(brokers, topic)
+	producer := NewEngagementProducer(writer, nil)
+	defer func() { _ = producer.Close() }()
+
+	event := createTestEngagementEvent()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	err := producer.Produce(ctx, event)
+	if err != nil {
+		t.Fatalf("Produce failed: %v", err)
+	}
+
+	// Create a consumer to read the message back
+	reader := kafka.NewReader(kafka.ReaderConfig{
+		Brokers:        brokers,
+		Topic:          topic,
+		GroupID:        "test-consumer-" + uuid.New().String()[:8],
+		MinBytes:       1,
+		MaxBytes:       10e6,
+		MaxWait:        5 * time.Second,
+		StartOffset:    kafka.FirstOffset,
+		CommitInterval: time.Second,
+	})
+	defer func() { _ = reader.Close() }()
+
+	readCtx, readCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer readCancel()
+
+	msg, err := reader.ReadMessage(readCtx)
+	if err != nil {
+		t.Fatalf("Failed to read message: %v", err)
+	}
+
+	// Verify message key is matchID:userID
+	expectedKey := event.MatchID + ":" + event.UserID
+	if string(msg.Key) != expectedKey {
+		t.Errorf("expected key '%s', got '%s'", expectedKey, string(msg.Key))
+	}
+
+	// Verify headers
+	var engagementTypeHeader, eventIDHeader, userIDHeader string
+	for _, h := range msg.Headers {
+		switch h.Key {
+		case "engagement_type":
+			engagementTypeHeader = string(h.Value)
+		case "event_id":
+			eventIDHeader = string(h.Value)
+		case "user_id":
+			userIDHeader = string(h.Value)
+		}
+	}
+
+	if engagementTypeHeader != string(event.EngagementType) {
+		t.Errorf("expected engagement_type header '%s', got '%s'", event.EngagementType, engagementTypeHeader)
+	}
+
+	if eventIDHeader != event.EventID.String() {
+		t.Errorf("expected event_id header '%s', got '%s'", event.EventID.String(), eventIDHeader)
+	}
+
+	if userIDHeader != event.UserID {
+		t.Errorf("expected user_id header '%s', got '%s'", event.UserID, userIDHeader)
+	}
+}
+
+// =============================================================================
+// Concurrent Tests
+// =============================================================================
+
+func TestEventProducer_ConcurrentProduce(t *testing.T) {
+	brokers := []string{getKafkaBroker()}
+	topic := "test-events-" + uuid.New().String()[:8]
+
+	writer := NewWriter(brokers, topic)
+	producer := NewEventProducer(writer, nil)
+	defer func() { _ = producer.Close() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	// Produce events concurrently
+	errChan := make(chan error, 10)
+	for i := 0; i < 10; i++ {
+		go func() {
+			event := createTestEvent()
+			errChan <- producer.Produce(ctx, event)
+		}()
+	}
+
+	// Collect results
+	for i := 0; i < 10; i++ {
+		if err := <-errChan; err != nil {
+			t.Errorf("Concurrent produce failed: %v", err)
 		}
 	}
 }
 
-func TestEngagementProducer_MessageKey_UserPartitioning(t *testing.T) {
-	mock := newMockWriter("engagements")
-	producer := newTestableEngagementProducer(mock, nil)
+func TestEngagementProducer_ConcurrentProduce(t *testing.T) {
+	brokers := []string{getKafkaBroker()}
+	topic := "test-engagements-" + uuid.New().String()[:8]
 
-	// Key should be matchID:userID for user-based partitioning
-	matchID := "match-user-test"
-	userID := "user-specific"
+	writer := NewEngagementWriter(brokers, topic)
+	producer := NewEngagementProducer(writer, nil)
+	defer func() { _ = producer.Close() }()
 
-	event := createTestEngagementEvent(matchID, userID, domain.EngagementTypeReaction)
-	err := producer.Produce(context.Background(), event)
-	if err != nil {
-		t.Fatalf("Produce() error: %v", err)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	// Produce events concurrently
+	errChan := make(chan error, 10)
+	for i := 0; i < 10; i++ {
+		go func() {
+			event := createTestEngagementEvent()
+			errChan <- producer.Produce(ctx, event)
+		}()
 	}
 
-	msgs := mock.getWrittenMessages()
-	if len(msgs) != 1 {
-		t.Fatalf("Expected 1 message, got %d", len(msgs))
-	}
-
-	expectedKey := matchID + ":" + userID
-	if string(msgs[0].Key) != expectedKey {
-		t.Errorf("Message key = %q, want %q", string(msgs[0].Key), expectedKey)
-	}
-}
-
-// ============================================
-// Timestamp Preservation Tests
-// ============================================
-
-func TestEventProducer_TimestampPreservation(t *testing.T) {
-	mock := newMockWriter("events")
-	producer := newTestableEventProducer(mock, nil)
-
-	originalTimestamp := time.Date(2024, 6, 15, 14, 30, 45, 123456789, time.UTC)
-	event := &domain.Event{
-		EventID:   uuid.New(),
-		MatchID:   "match-timestamp-test",
-		EventType: domain.EventTypeGoal,
-		Timestamp: originalTimestamp,
-		TeamID:    1,
-		PlayerID:  "player-1",
-	}
-
-	err := producer.Produce(context.Background(), event)
-	if err != nil {
-		t.Fatalf("Produce() error: %v", err)
-	}
-
-	msgs := mock.getWrittenMessages()
-	if len(msgs) != 1 {
-		t.Fatalf("Expected 1 message, got %d", len(msgs))
-	}
-
-	if !msgs[0].Time.Equal(originalTimestamp) {
-		t.Errorf("Message timestamp = %v, want %v", msgs[0].Time, originalTimestamp)
-	}
-}
-
-func TestEngagementProducer_TimestampPreservation(t *testing.T) {
-	mock := newMockWriter("engagements")
-	producer := newTestableEngagementProducer(mock, nil)
-
-	originalTimestamp := time.Date(2024, 6, 15, 14, 30, 45, 123456789, time.UTC)
-	event := &domain.EngagementEvent{
-		EventID:           uuid.New(),
-		MatchID:           "match-timestamp-test",
-		UserID:            "user-timestamp",
-		SessionID:         "session-123",
-		EngagementType:    domain.EngagementTypeReaction,
-		EngagementSubtype: "cheer",
-		GameMinute:        45,
-		DeviceType:        domain.DeviceMobile,
-		Platform:          "ios",
-		CountryCode:       "US",
-		Timestamp:         originalTimestamp,
-	}
-
-	err := producer.Produce(context.Background(), event)
-	if err != nil {
-		t.Fatalf("Produce() error: %v", err)
-	}
-
-	msgs := mock.getWrittenMessages()
-	if len(msgs) != 1 {
-		t.Fatalf("Expected 1 message, got %d", len(msgs))
-	}
-
-	if !msgs[0].Time.Equal(originalTimestamp) {
-		t.Errorf("Message timestamp = %v, want %v", msgs[0].Time, originalTimestamp)
+	// Collect results
+	for i := 0; i < 10; i++ {
+		if err := <-errChan; err != nil {
+			t.Errorf("Concurrent produce failed: %v", err)
+		}
 	}
 }

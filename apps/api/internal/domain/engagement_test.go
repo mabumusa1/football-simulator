@@ -13,12 +13,12 @@ func TestEngagementEventRequest_ToEngagementEvent_ValidRequest(t *testing.T) {
 	validTimestamp := time.Now().UTC().Format(time.RFC3339)
 
 	tests := []struct {
-		name              string
-		request           EngagementEventRequest
-		wantMatchID       string
-		wantUserID        string
-		wantType          EngagementType
-		wantDeviceType    DeviceType
+		name           string
+		request        EngagementEventRequest
+		wantMatchID    string
+		wantUserID     string
+		wantType       EngagementType
+		wantDeviceType DeviceType
 	}{
 		{
 			name: "valid reaction engagement",
@@ -1176,9 +1176,9 @@ func TestEngagementEventRequest_ToEngagementEvent_OptionalFields(t *testing.T) {
 		EngagementSubtype: "", // optional
 		GameMinute:        0,  // edge case: minute 0
 		DeviceType:        "mobile",
-		Platform:          "", // optional
-		CountryCode:       "", // optional
-		Content:           "", // optional
+		Platform:          "",  // optional
+		CountryCode:       "",  // optional
+		Content:           "",  // optional
 		Metadata:          nil, // optional
 		Timestamp:         validTimestamp,
 	}
