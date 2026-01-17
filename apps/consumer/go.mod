@@ -5,9 +5,12 @@ go 1.24.0
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.42.0
 	github.com/google/uuid v1.6.0
+	github.com/mabumusa1/football-simulator/pkg v0.0.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/segmentio/kafka-go v0.4.50
 )
+
+replace github.com/mabumusa1/football-simulator/pkg => ../../pkg
 
 require (
 	github.com/ClickHouse/ch-go v0.69.0 // indirect

@@ -21,6 +21,9 @@ const (
 	EngagementTypeSession     EngagementType = "session"
 )
 
+// Validation error messages
+const errRequired = "is required"
+
 // ValidEngagementTypes is a map of all valid engagement types for validation.
 var ValidEngagementTypes = map[EngagementType]bool{
 	EngagementTypeReaction:    true,
@@ -135,13 +138,13 @@ func (r *EngagementEventRequest) ToEngagementEvent() (*EngagementEvent, error) {
 
 	// Validate required fields
 	if r.MatchID == "" {
-		return nil, NewValidationError("match_id", "is required")
+		return nil, NewValidationError("match_id", errRequired)
 	}
 	if r.UserID == "" {
-		return nil, NewValidationError("user_id", "is required")
+		return nil, NewValidationError("user_id", errRequired)
 	}
 	if r.SessionID == "" {
-		return nil, NewValidationError("session_id", "is required")
+		return nil, NewValidationError("session_id", errRequired)
 	}
 
 	// Validate engagement type

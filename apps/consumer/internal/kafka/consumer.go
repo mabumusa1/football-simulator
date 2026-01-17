@@ -78,15 +78,15 @@ var (
 	)
 )
 
-// Repository defines the interface for batch event insertion.
-type Repository interface {
+// BatchInserter defines the interface for batch event insertion.
+type BatchInserter interface {
 	InsertBatch(ctx context.Context, events []*domain.Event) error
 }
 
 // BatchConsumer consumes events from Kafka and batch inserts them into ClickHouse.
 type BatchConsumer struct {
 	reader        *kafka.Reader
-	repository    Repository
+	repository    BatchInserter
 	retryWriter   *kafka.Writer
 	deadWriter    *kafka.Writer
 	batchSize     int
@@ -106,7 +106,7 @@ type BatchConsumer struct {
 // BatchConsumerConfig holds configuration for the batch consumer.
 type BatchConsumerConfig struct {
 	Reader        *kafka.Reader
-	Repository    Repository
+	Repository    BatchInserter
 	RetryWriter   *kafka.Writer
 	DeadWriter    *kafka.Writer
 	BatchSize     int

@@ -1,7 +1,7 @@
 package main
 
 import (
-	_ "embed"
+	_ "embed" // Required for go:embed directive to embed openapi.yaml
 	"fmt"
 	"log/slog"
 	"net/http"

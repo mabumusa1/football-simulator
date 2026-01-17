@@ -114,6 +114,11 @@ func EngagementEventFromKafkaMessage(data []byte) (*EngagementEvent, error) {
 	}, nil
 }
 
+// GetEventID returns the event's UUID for the EventWithID interface.
+func (e *EngagementEvent) GetEventID() uuid.UUID {
+	return e.EventID
+}
+
 // MetadataJSON serializes the engagement metadata to a JSON string.
 func (e *EngagementEvent) MetadataJSON() string {
 	if e.Metadata == nil {
