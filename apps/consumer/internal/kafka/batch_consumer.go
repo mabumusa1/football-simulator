@@ -207,11 +207,17 @@ func (c *GenericBatchConsumer[T]) flusher(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			c.logger.Info(fmt.Sprintf("%s flusher stopping, final flush", c.consumerName))
-			c.flushWithContext(context.Background())
+			// Use a non-cancellable context with timeout for final flush
+			finalCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+			c.flushWithContext(finalCtx)
+			cancel()
 			return
 		case <-c.done:
 			c.logger.Info(fmt.Sprintf("%s flusher stopping, final flush", c.consumerName))
-			c.flushWithContext(context.Background())
+			// Use a non-cancellable context with timeout for final flush
+			finalCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+			c.flushWithContext(finalCtx)
+			cancel()
 			return
 		case <-c.ticker.C:
 			c.flushWithContext(ctx)

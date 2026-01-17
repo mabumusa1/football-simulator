@@ -1,25 +1,31 @@
 package domain
 
 import (
-	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
+
+	sharedDomain "github.com/mabumusa1/football-simulator/pkg/domain"
 )
 
-// EngagementType represents the type of user engagement.
-type EngagementType string
+// Re-export types from shared domain package
+type EngagementType = sharedDomain.EngagementType
+type EngagementEvent = sharedDomain.EngagementEvent
+type EngagementKafkaMessage = sharedDomain.EngagementKafkaMessage
 
-// Engagement type constants for all supported engagement types.
+// Re-export constants from shared domain package
 const (
-	EngagementTypeReaction    EngagementType = "reaction"
-	EngagementTypeComment     EngagementType = "comment"
-	EngagementTypeVideoAction EngagementType = "video_action"
-	EngagementTypeShare       EngagementType = "share"
-	EngagementTypePrediction  EngagementType = "prediction"
-	EngagementTypeClick       EngagementType = "click"
-	EngagementTypeSession     EngagementType = "session"
+	EngagementTypeReaction    = sharedDomain.EngagementTypeReaction
+	EngagementTypeComment     = sharedDomain.EngagementTypeComment
+	EngagementTypeVideoAction = sharedDomain.EngagementTypeVideoAction
+	EngagementTypeShare       = sharedDomain.EngagementTypeShare
+	EngagementTypePrediction  = sharedDomain.EngagementTypePrediction
+	EngagementTypeClick       = sharedDomain.EngagementTypeClick
+	EngagementTypeSession     = sharedDomain.EngagementTypeSession
 )
+
+// Re-export functions from shared domain package
+var EngagementEventFromKafkaMessage = sharedDomain.EngagementEventFromKafkaMessage
 
 // Validation error messages
 const errRequired = "is required"
@@ -87,24 +93,6 @@ var ValidDeviceTypes = map[DeviceType]bool{
 	DeviceUnknown: true,
 }
 
-// EngagementEvent represents a validated user engagement event.
-type EngagementEvent struct {
-	EventID            uuid.UUID
-	MatchID            string
-	UserID             string
-	SessionID          string
-	EngagementType     EngagementType
-	EngagementSubtype  string
-	RelatedGameEventID *uuid.UUID
-	GameMinute         int
-	DeviceType         DeviceType
-	Platform           string
-	CountryCode        string
-	Content            string
-	Metadata           map[string]interface{}
-	Timestamp          time.Time
-}
-
 // EngagementEventRequest represents the incoming JSON request for an engagement event.
 type EngagementEventRequest struct {
 	EventID            string                 `json:"event_id"`
@@ -165,7 +153,7 @@ func (r *EngagementEventRequest) ToEngagementEvent() (*EngagementEvent, error) {
 		relatedGameEventID = &parsed
 	}
 
-	// Validate device type
+	// Validate device type - convert to string for shared struct
 	deviceType := DeviceType(r.DeviceType)
 	if !ValidDeviceTypes[deviceType] {
 		deviceType = DeviceUnknown
@@ -195,70 +183,13 @@ func (r *EngagementEventRequest) ToEngagementEvent() (*EngagementEvent, error) {
 		EngagementSubtype:  r.EngagementSubtype,
 		RelatedGameEventID: relatedGameEventID,
 		GameMinute:         r.GameMinute,
-		DeviceType:         deviceType,
+		DeviceType:         string(deviceType),
 		Platform:           r.Platform,
 		CountryCode:        r.CountryCode,
 		Content:            r.Content,
 		Metadata:           r.Metadata,
 		Timestamp:          timestamp,
 	}, nil
-}
-
-// MetadataJSON serializes the engagement metadata to a JSON string.
-func (e *EngagementEvent) MetadataJSON() string {
-	if e.Metadata == nil {
-		return "{}"
-	}
-	data, err := json.Marshal(e.Metadata)
-	if err != nil {
-		return "{}"
-	}
-	return string(data)
-}
-
-// EngagementKafkaMessage represents the serialized form for Kafka.
-type EngagementKafkaMessage struct {
-	EventID            string                 `json:"eventId"`
-	MatchID            string                 `json:"matchId"`
-	UserID             string                 `json:"userId"`
-	SessionID          string                 `json:"sessionId"`
-	EngagementType     string                 `json:"engagementType"`
-	EngagementSubtype  string                 `json:"engagementSubtype"`
-	RelatedGameEventID *string                `json:"relatedGameEventId,omitempty"`
-	GameMinute         int                    `json:"gameMinute"`
-	DeviceType         string                 `json:"deviceType"`
-	Platform           string                 `json:"platform"`
-	CountryCode        string                 `json:"countryCode"`
-	Content            string                 `json:"content"`
-	Metadata           map[string]interface{} `json:"metadata,omitempty"`
-	Timestamp          string                 `json:"timestamp"`
-}
-
-// ToKafkaMessage converts an EngagementEvent to a JSON byte slice for Kafka.
-func (e *EngagementEvent) ToKafkaMessage() ([]byte, error) {
-	var relatedEventID *string
-	if e.RelatedGameEventID != nil {
-		id := e.RelatedGameEventID.String()
-		relatedEventID = &id
-	}
-
-	msg := EngagementKafkaMessage{
-		EventID:            e.EventID.String(),
-		MatchID:            e.MatchID,
-		UserID:             e.UserID,
-		SessionID:          e.SessionID,
-		EngagementType:     string(e.EngagementType),
-		EngagementSubtype:  e.EngagementSubtype,
-		RelatedGameEventID: relatedEventID,
-		GameMinute:         e.GameMinute,
-		DeviceType:         string(e.DeviceType),
-		Platform:           e.Platform,
-		CountryCode:        e.CountryCode,
-		Content:            e.Content,
-		Metadata:           e.Metadata,
-		Timestamp:          e.Timestamp.Format(time.RFC3339Nano),
-	}
-	return json.Marshal(msg)
 }
 
 // EngagementMetrics represents aggregated engagement metrics for a match.

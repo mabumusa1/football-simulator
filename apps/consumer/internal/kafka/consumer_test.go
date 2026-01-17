@@ -836,3 +836,402 @@ func TestBatchConsumer_ConcurrentProducers(t *testing.T) {
 
 	_ = reader.Close()
 }
+
+// =============================================================================
+// Error Path Tests
+// =============================================================================
+
+// MockBatchInserter implements BatchInserter for testing error paths.
+type MockBatchInserter struct {
+	insertErr   error
+	insertCount int
+}
+
+func (m *MockBatchInserter) InsertBatch(ctx context.Context, events []*domain.Event) error {
+	m.insertCount++
+	return m.insertErr
+}
+
+func TestBatchConsumer_ExtractRetryCount_EdgeCases(t *testing.T) {
+	repo, cleanup := setupTestRepository(t)
+	defer cleanup()
+
+	consumer := NewBatchConsumer(BatchConsumerConfig{
+		Repository: repo,
+	})
+
+	t.Run("index out of bounds returns 0", func(t *testing.T) {
+		messages := []kafka.Message{
+			{Value: []byte("test")},
+		}
+		count := consumer.extractRetryCount(messages, 5)
+		if count != 0 {
+			t.Errorf("expected 0 for out of bounds index, got %d", count)
+		}
+	})
+
+	t.Run("empty messages returns 0", func(t *testing.T) {
+		count := consumer.extractRetryCount([]kafka.Message{}, 0)
+		if count != 0 {
+			t.Errorf("expected 0 for empty messages, got %d", count)
+		}
+	})
+
+	t.Run("no retry_count header returns 0", func(t *testing.T) {
+		messages := []kafka.Message{
+			{
+				Value: []byte("test"),
+				Headers: []kafka.Header{
+					{Key: "other_header", Value: []byte("value")},
+				},
+			},
+		}
+		count := consumer.extractRetryCount(messages, 0)
+		if count != 0 {
+			t.Errorf("expected 0 for missing retry_count header, got %d", count)
+		}
+	})
+
+	t.Run("empty retry_count value returns 0", func(t *testing.T) {
+		messages := []kafka.Message{
+			{
+				Value: []byte("test"),
+				Headers: []kafka.Header{
+					{Key: "retry_count", Value: []byte{}},
+				},
+			},
+		}
+		count := consumer.extractRetryCount(messages, 0)
+		if count != 0 {
+			t.Errorf("expected 0 for empty retry_count value, got %d", count)
+		}
+	})
+
+	t.Run("valid retry_count returns correct value", func(t *testing.T) {
+		messages := []kafka.Message{
+			{
+				Value: []byte("test"),
+				Headers: []kafka.Header{
+					{Key: "retry_count", Value: []byte{2}},
+				},
+			},
+		}
+		count := consumer.extractRetryCount(messages, 0)
+		if count != 2 {
+			t.Errorf("expected 2 for valid retry_count, got %d", count)
+		}
+	})
+}
+
+func TestBatchConsumer_FlushWithContext_EmptyBatch(t *testing.T) {
+	repo, cleanup := setupTestRepository(t)
+	defer cleanup()
+
+	consumer := NewBatchConsumer(BatchConsumerConfig{
+		Repository: repo,
+	})
+
+	// Flush empty batch should return early without error
+	ctx := context.Background()
+	consumer.flushWithContext(ctx) // Should not panic
+}
+
+func TestBatchConsumer_FlushWithContext_InsertError(t *testing.T) {
+	mockRepo := &MockBatchInserter{
+		insertErr: fmt.Errorf("database connection failed"),
+	}
+
+	brokers := []string{getKafkaBroker()}
+	retryTopic := "test-retry-flush-" + uuid.New().String()[:8]
+	deadTopic := "test-dead-flush-" + uuid.New().String()[:8]
+
+	retryWriter := NewWriter(brokers, retryTopic)
+	deadWriter := NewWriter(brokers, deadTopic)
+	defer func() {
+		_ = retryWriter.Close()
+		_ = deadWriter.Close()
+	}()
+
+	consumer := NewBatchConsumer(BatchConsumerConfig{
+		Repository:  mockRepo,
+		RetryWriter: retryWriter,
+		DeadWriter:  deadWriter,
+		MaxRetries:  3,
+	})
+
+	// Add events to batch manually
+	event := createTestEvent()
+	consumer.batch = append(consumer.batch, event)
+	consumer.messages = append(consumer.messages, kafka.Message{Value: []byte("test")})
+
+	// Flush should handle error and attempt retry
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	consumer.flushWithContext(ctx)
+
+	// Verify insert was attempted
+	if mockRepo.insertCount != 1 {
+		t.Errorf("expected 1 insert attempt, got %d", mockRepo.insertCount)
+	}
+}
+
+func TestBatchConsumer_SendToRetry_NoRetryWriter(t *testing.T) {
+	mockRepo := &MockBatchInserter{}
+
+	brokers := []string{getKafkaBroker()}
+	deadTopic := "test-dead-noretry-" + uuid.New().String()[:8]
+
+	deadWriter := NewWriter(brokers, deadTopic)
+	defer func() { _ = deadWriter.Close() }()
+
+	// Create consumer WITHOUT retry writer but WITH dead writer
+	consumer := NewBatchConsumer(BatchConsumerConfig{
+		Repository: mockRepo,
+		DeadWriter: deadWriter,
+	})
+
+	events := []*domain.Event{createTestEvent()}
+	messages := []kafka.Message{{Value: []byte("test")}}
+
+	// This should send to dead letter instead of retry
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	consumer.sendToRetry(ctx, events, messages)
+}
+
+func TestBatchConsumer_SendToRetry_MaxRetriesExceeded(t *testing.T) {
+	mockRepo := &MockBatchInserter{}
+
+	brokers := []string{getKafkaBroker()}
+	retryTopic := "test-retry-maxretries-" + uuid.New().String()[:8]
+	deadTopic := "test-dead-maxretries-" + uuid.New().String()[:8]
+
+	retryWriter := NewWriter(brokers, retryTopic)
+	deadWriter := NewWriter(brokers, deadTopic)
+	defer func() {
+		_ = retryWriter.Close()
+		_ = deadWriter.Close()
+	}()
+
+	consumer := NewBatchConsumer(BatchConsumerConfig{
+		Repository:  mockRepo,
+		RetryWriter: retryWriter,
+		DeadWriter:  deadWriter,
+		MaxRetries:  3,
+	})
+
+	event := createTestEvent()
+	events := []*domain.Event{event}
+
+	// Create message with retry count >= max retries
+	messages := []kafka.Message{
+		{
+			Value: []byte("test"),
+			Headers: []kafka.Header{
+				{Key: "retry_count", Value: []byte{3}}, // Already at max
+			},
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	consumer.sendToRetry(ctx, events, messages)
+}
+
+func TestBatchConsumer_SendSingleToDead_NoDeadWriter(t *testing.T) {
+	mockRepo := &MockBatchInserter{}
+
+	// Create consumer WITHOUT dead writer
+	consumer := NewBatchConsumer(BatchConsumerConfig{
+		Repository: mockRepo,
+	})
+
+	event := createTestEvent()
+	ctx := context.Background()
+
+	// This should log an error but not panic
+	consumer.sendSingleToDead(ctx, event)
+}
+
+func TestBatchConsumer_PrepareRetryMessage_SerializationError(t *testing.T) {
+	repo, cleanup := setupTestRepository(t)
+	defer cleanup()
+
+	brokers := []string{getKafkaBroker()}
+	retryTopic := "test-retry-serial-" + uuid.New().String()[:8]
+	retryWriter := NewWriter(brokers, retryTopic)
+	defer func() { _ = retryWriter.Close() }()
+
+	consumer := NewBatchConsumer(BatchConsumerConfig{
+		Repository:  repo,
+		RetryWriter: retryWriter,
+		MaxRetries:  3,
+	})
+
+	// Create a valid event
+	event := createTestEvent()
+
+	// With empty original messages, the index check should handle gracefully
+	msg, ok := consumer.prepareRetryMessage(context.Background(), event, []kafka.Message{}, 0)
+
+	// Should succeed with retry count of 1
+	if !ok {
+		t.Error("expected prepareRetryMessage to succeed for valid event")
+	}
+	if msg.Key == nil {
+		t.Error("expected message key to be set")
+	}
+}
+
+func TestBatchConsumer_CommitOriginalMessages_EmptyMessages(t *testing.T) {
+	repo, cleanup := setupTestRepository(t)
+	defer cleanup()
+
+	consumer := NewBatchConsumer(BatchConsumerConfig{
+		Repository: repo,
+	})
+
+	// Should return early without error
+	ctx := context.Background()
+	consumer.commitOriginalMessages(ctx, []kafka.Message{})
+}
+
+func TestBatchConsumer_Stop_Clean(t *testing.T) {
+	repo, cleanup := setupTestRepository(t)
+	defer cleanup()
+
+	consumer := NewBatchConsumer(BatchConsumerConfig{
+		Repository:  repo,
+		WorkerCount: 1,
+	})
+
+	// Stop should work even if Start was never called
+	// This tests the channel close behavior
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		consumer.Stop()
+	}()
+
+	// Wait for stop to complete
+	select {
+	case <-consumer.done:
+		// Expected
+	case <-time.After(2 * time.Second):
+		t.Fatal("stop did not complete in time")
+	}
+}
+
+func TestBatchConsumer_UpdateLagMetric(t *testing.T) {
+	repo, cleanup := setupTestRepository(t)
+	defer cleanup()
+
+	brokers := []string{getKafkaBroker()}
+	topic := "test-lag-metric-" + uuid.New().String()[:8]
+	groupID := "test-group-" + uuid.New().String()[:8]
+
+	reader := NewReader(DefaultReaderConfig(brokers, topic, groupID))
+	defer func() { _ = reader.Close() }()
+
+	consumer := NewBatchConsumer(BatchConsumerConfig{
+		Repository: repo,
+		Reader:     reader,
+	})
+
+	// Create a test message
+	msg := kafka.Message{
+		Topic:     topic,
+		Partition: 0,
+		Offset:    100,
+	}
+
+	// Should not panic
+	consumer.updateLagMetric(msg)
+}
+
+// =============================================================================
+// Domain Event Error Path Tests
+// =============================================================================
+
+func TestDomain_EventFromKafkaMessage_MissingMatchID(t *testing.T) {
+	msg := `{"eventId":"550e8400-e29b-41d4-a716-446655440000","matchId":"","eventType":"goal","timestamp":"2024-01-01T00:00:00Z"}`
+	_, err := domain.EventFromKafkaMessage([]byte(msg))
+	if err == nil {
+		t.Error("expected error for missing matchId")
+	}
+}
+
+func TestDomain_EventFromKafkaMessage_InvalidEventID(t *testing.T) {
+	msg := `{"eventId":"invalid-uuid","matchId":"match-123","eventType":"goal","timestamp":"2024-01-01T00:00:00Z"}`
+	_, err := domain.EventFromKafkaMessage([]byte(msg))
+	if err == nil {
+		t.Error("expected error for invalid eventId")
+	}
+}
+
+func TestDomain_EventFromKafkaMessage_InvalidTimestamp(t *testing.T) {
+	// The code falls back to current time for invalid timestamps
+	msg := `{"eventId":"550e8400-e29b-41d4-a716-446655440000","matchId":"match-123","eventType":"goal","timestamp":"invalid-timestamp"}`
+	event, err := domain.EventFromKafkaMessage([]byte(msg))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Should have a valid timestamp (defaulted to now)
+	if event.Timestamp.IsZero() {
+		t.Error("expected non-zero timestamp")
+	}
+}
+
+func TestDomain_Event_ToKafkaMessage_RoundTrip(t *testing.T) {
+	original := createTestEvent()
+	original.Metadata = map[string]interface{}{
+		"key1": "value1",
+		"key2": float64(42),
+	}
+
+	value, err := original.ToKafkaMessage()
+	if err != nil {
+		t.Fatalf("failed to serialize: %v", err)
+	}
+
+	parsed, err := domain.EventFromKafkaMessage(value)
+	if err != nil {
+		t.Fatalf("failed to parse: %v", err)
+	}
+
+	if original.EventID != parsed.EventID {
+		t.Errorf("EventID mismatch: %v != %v", original.EventID, parsed.EventID)
+	}
+	if original.MatchID != parsed.MatchID {
+		t.Errorf("MatchID mismatch: %s != %s", original.MatchID, parsed.MatchID)
+	}
+	if original.EventType != parsed.EventType {
+		t.Errorf("EventType mismatch: %s != %s", original.EventType, parsed.EventType)
+	}
+}
+
+func TestDomain_Event_MetadataJSON(t *testing.T) {
+	t.Run("nil metadata returns empty object", func(t *testing.T) {
+		event := createTestEvent()
+		event.Metadata = nil
+		json := event.MetadataJSON()
+		if json != "{}" {
+			t.Errorf("expected {}, got %s", json)
+		}
+	})
+
+	t.Run("valid metadata returns JSON", func(t *testing.T) {
+		event := createTestEvent()
+		event.Metadata = map[string]interface{}{"key": "value"}
+		json := event.MetadataJSON()
+		if json != `{"key":"value"}` {
+			t.Errorf("expected {\"key\":\"value\"}, got %s", json)
+		}
+	})
+}
+
+func TestDomain_Event_GetEventID(t *testing.T) {
+	event := createTestEvent()
+	if event.GetEventID() != event.EventID {
+		t.Errorf("GetEventID mismatch: %v != %v", event.GetEventID(), event.EventID)
+	}
+}

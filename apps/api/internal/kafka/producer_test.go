@@ -869,3 +869,353 @@ func TestEngagementProducer_ConcurrentProduce(t *testing.T) {
 		}
 	}
 }
+
+// =============================================================================
+// Edge Case and Error Path Tests
+// =============================================================================
+
+func TestEventProducer_Produce_ContextCanceled(t *testing.T) {
+	brokers := []string{getKafkaBroker()}
+	topic := "test-events-" + uuid.New().String()[:8]
+
+	writer := NewWriter(brokers, topic)
+	producer := NewEventProducer(writer, nil)
+	defer func() { _ = producer.Close() }()
+
+	// Create already canceled context
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	event := createTestEvent()
+	err := producer.Produce(ctx, event)
+
+	// Should return an error due to canceled context
+	if err == nil {
+		t.Error("expected error for canceled context")
+	}
+}
+
+func TestEngagementProducer_Produce_ContextCanceled(t *testing.T) {
+	brokers := []string{getKafkaBroker()}
+	topic := "test-engagements-" + uuid.New().String()[:8]
+
+	writer := NewEngagementWriter(brokers, topic)
+	producer := NewEngagementProducer(writer, nil)
+	defer func() { _ = producer.Close() }()
+
+	// Create already canceled context
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	event := createTestEngagementEvent()
+	err := producer.Produce(ctx, event)
+
+	// Should return an error due to canceled context
+	if err == nil {
+		t.Error("expected error for canceled context")
+	}
+}
+
+func TestEngagementProducer_ProduceBatch_AllNil(t *testing.T) {
+	brokers := []string{getKafkaBroker()}
+	topic := "test-engagements-" + uuid.New().String()[:8]
+
+	writer := NewEngagementWriter(brokers, topic)
+	producer := NewEngagementProducer(writer, nil)
+	defer func() { _ = producer.Close() }()
+
+	events := []*domain.EngagementEvent{nil, nil, nil}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err := producer.ProduceBatch(ctx, events)
+	if err != nil {
+		t.Fatalf("expected no error for all nil events, got: %v", err)
+	}
+}
+
+func TestEngagementProducer_Close_NilWriter(t *testing.T) {
+	producer := &EngagementProducer{
+		writer: nil,
+		logger: nil,
+	}
+
+	err := producer.Close()
+	if err != nil {
+		t.Fatalf("expected no error for nil writer, got: %v", err)
+	}
+}
+
+func TestEnsureTopic_Success(t *testing.T) {
+	broker := getKafkaBroker()
+	topic := "test-ensure-topic-" + uuid.New().String()[:8]
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err := EnsureTopic(ctx, broker, topic)
+	if err != nil {
+		t.Fatalf("EnsureTopic failed: %v", err)
+	}
+}
+
+func TestEnsureTopic_InvalidBroker(t *testing.T) {
+	// Use invalid broker address
+	broker := "invalid-broker:9092"
+	topic := "test-topic"
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	err := EnsureTopic(ctx, broker, topic)
+	if err == nil {
+		t.Error("expected error for invalid broker")
+	}
+}
+
+func TestNewWriterWithConfig_ZeroMaxAttempts(t *testing.T) {
+	cfg := WriterConfig{
+		Brokers:      []string{getKafkaBroker()},
+		Topic:        "test-topic-" + uuid.New().String()[:8],
+		BatchSize:    100,
+		BatchTimeout: 10 * time.Millisecond,
+		WriteTimeout: 5 * time.Second,
+		MaxAttempts:  0, // Zero - should use default
+		Async:        false,
+	}
+
+	writer := NewWriterWithConfig(cfg)
+	defer func() { _ = writer.Close() }()
+
+	if writer == nil {
+		t.Fatal("expected non-nil writer")
+	}
+
+	// Zero max attempts means default kafka-go behavior
+	if writer.MaxAttempts != 0 {
+		t.Errorf("expected MaxAttempts 0 for zero config, got %d", writer.MaxAttempts)
+	}
+}
+
+func TestNewWriterWithConfig_CustomMaxAttempts(t *testing.T) {
+	cfg := WriterConfig{
+		Brokers:      []string{getKafkaBroker()},
+		Topic:        "test-topic-" + uuid.New().String()[:8],
+		BatchSize:    100,
+		BatchTimeout: 10 * time.Millisecond,
+		WriteTimeout: 5 * time.Second,
+		MaxAttempts:  5,
+		Async:        false,
+	}
+
+	writer := NewWriterWithConfig(cfg)
+	defer func() { _ = writer.Close() }()
+
+	if writer.MaxAttempts != 5 {
+		t.Errorf("expected MaxAttempts 5, got %d", writer.MaxAttempts)
+	}
+}
+
+func TestEventProducer_ProduceBatch_ContextCanceled(t *testing.T) {
+	brokers := []string{getKafkaBroker()}
+	topic := "test-events-" + uuid.New().String()[:8]
+
+	writer := NewWriter(brokers, topic)
+	producer := NewEventProducer(writer, nil)
+	defer func() { _ = producer.Close() }()
+
+	// Create already canceled context
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	events := []*domain.Event{createTestEvent(), createTestEvent()}
+	err := producer.ProduceBatch(ctx, events)
+
+	// Should return an error due to canceled context
+	if err == nil {
+		t.Error("expected error for canceled context in batch produce")
+	}
+}
+
+func TestEngagementProducer_ProduceBatch_ContextCanceled(t *testing.T) {
+	brokers := []string{getKafkaBroker()}
+	topic := "test-engagements-" + uuid.New().String()[:8]
+
+	writer := NewEngagementWriter(brokers, topic)
+	producer := NewEngagementProducer(writer, nil)
+	defer func() { _ = producer.Close() }()
+
+	// Create already canceled context
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	events := []*domain.EngagementEvent{createTestEngagementEvent(), createTestEngagementEvent()}
+	err := producer.ProduceBatch(ctx, events)
+
+	// Should return an error due to canceled context
+	if err == nil {
+		t.Error("expected error for canceled context in batch produce")
+	}
+}
+
+func TestEventProducer_Ping_InvalidBroker(t *testing.T) {
+	// Create writer with invalid broker
+	writer := &kafka.Writer{
+		Addr:  kafka.TCP("invalid-broker:9092"),
+		Topic: "test-topic",
+	}
+
+	producer := NewEventProducer(writer, nil)
+	defer func() { _ = producer.Close() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	err := producer.Ping(ctx)
+	if err == nil {
+		t.Error("expected error for invalid broker ping")
+	}
+}
+
+func TestEngagementProducer_Ping_InvalidBroker(t *testing.T) {
+	// Create writer with invalid broker
+	writer := &kafka.Writer{
+		Addr:  kafka.TCP("invalid-broker:9092"),
+		Topic: "test-topic",
+	}
+
+	producer := NewEngagementProducer(writer, nil)
+	defer func() { _ = producer.Close() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	err := producer.Ping(ctx)
+	if err == nil {
+		t.Error("expected error for invalid broker ping")
+	}
+}
+
+func TestEventProducer_EventWithMetadata(t *testing.T) {
+	brokers := []string{getKafkaBroker()}
+	topic := "test-events-" + uuid.New().String()[:8]
+	ensureTestTopic(t, topic)
+
+	writer := NewWriter(brokers, topic)
+	producer := NewEventProducer(writer, nil)
+	defer func() { _ = producer.Close() }()
+
+	event := createTestEvent()
+	event.Metadata = map[string]interface{}{
+		"minute":      45,
+		"home_score":  2,
+		"away_score":  1,
+		"is_overtime": false,
+		"nested": map[string]interface{}{
+			"key": "value",
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	err := producer.Produce(ctx, event)
+	if err != nil {
+		t.Fatalf("Produce failed with metadata: %v", err)
+	}
+}
+
+func TestEngagementProducer_EventWithMetadata(t *testing.T) {
+	brokers := []string{getKafkaBroker()}
+	topic := "test-engagements-" + uuid.New().String()[:8]
+	ensureTestTopic(t, topic)
+
+	writer := NewEngagementWriter(brokers, topic)
+	producer := NewEngagementProducer(writer, nil)
+	defer func() { _ = producer.Close() }()
+
+	event := createTestEngagementEvent()
+	event.Metadata = map[string]interface{}{
+		"source":        "mobile_app",
+		"app_version":   "2.0.1",
+		"screen_width":  1080,
+		"screen_height": 1920,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	err := producer.Produce(ctx, event)
+	if err != nil {
+		t.Fatalf("Produce failed with metadata: %v", err)
+	}
+}
+
+func TestEventProducer_RapidSuccessiveProduces(t *testing.T) {
+	brokers := []string{getKafkaBroker()}
+	topic := "test-events-" + uuid.New().String()[:8]
+	ensureTestTopic(t, topic)
+
+	writer := NewWriter(brokers, topic)
+	producer := NewEventProducer(writer, nil)
+	defer func() { _ = producer.Close() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	// Rapid successive produces (not concurrent)
+	for i := 0; i < 50; i++ {
+		event := createTestEvent()
+		err := producer.Produce(ctx, event)
+		if err != nil {
+			t.Fatalf("Produce failed on iteration %d: %v", i, err)
+		}
+	}
+}
+
+func TestEngagementProducer_AllEngagementTypesExtended(t *testing.T) {
+	engagementTypes := []domain.EngagementType{
+		domain.EngagementTypeReaction,
+		domain.EngagementTypeComment,
+		domain.EngagementTypeVideoAction,
+		domain.EngagementTypeShare,
+		domain.EngagementTypePrediction,
+		domain.EngagementTypeClick,
+		domain.EngagementTypeSession,
+	}
+
+	for _, engagementType := range engagementTypes {
+		t.Run(string(engagementType), func(t *testing.T) {
+			brokers := []string{getKafkaBroker()}
+			topic := "test-engagements-" + uuid.New().String()[:8]
+			ensureTestTopic(t, topic)
+
+			writer := NewEngagementWriter(brokers, topic)
+			producer := NewEngagementProducer(writer, nil)
+			defer func() { _ = producer.Close() }()
+
+			event := &domain.EngagementEvent{
+				EventID:           uuid.New(),
+				MatchID:           "match-123",
+				UserID:            "user-456",
+				SessionID:         "session-789",
+				EngagementType:    engagementType,
+				EngagementSubtype: "test-subtype",
+				GameMinute:        45,
+				DeviceType:        "mobile",
+				Platform:          "ios",
+				CountryCode:       "US",
+				Timestamp:         time.Now(),
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			err := producer.Produce(ctx, event)
+			if err != nil {
+				t.Fatalf("Produce failed for engagement type %s: %v", engagementType, err)
+			}
+		})
+	}
+}

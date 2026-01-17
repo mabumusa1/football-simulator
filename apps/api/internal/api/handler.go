@@ -86,8 +86,7 @@ func (h *Handler) IngestEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Produce to Kafka
-	ctx := r.Context()
-	if err := h.producer.Produce(ctx, event); err != nil {
+	if err := h.producer.Produce(r.Context(), event); err != nil {
 		RecordKafkaProduceError()
 		respondError(w, http.StatusServiceUnavailable, "failed to queue event", "")
 		return
@@ -299,8 +298,7 @@ func (h *Handler) IngestEngagements(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Produce to Kafka in batch
-	ctx := r.Context()
-	if err := h.engagementProducer.ProduceBatch(ctx, validEvents); err != nil {
+	if err := h.engagementProducer.ProduceBatch(r.Context(), validEvents); err != nil {
 		RecordKafkaProduceError()
 		respondError(w, http.StatusServiceUnavailable, "failed to queue engagements", "")
 		return

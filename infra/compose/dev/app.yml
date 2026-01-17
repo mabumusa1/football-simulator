@@ -4,6 +4,8 @@ services:
       context: ../../..
       dockerfile: .devcontainer/Dockerfile
 
+    init: true
+    stop_grace_period: 5s
     command: sleep infinity
 
     volumes:
