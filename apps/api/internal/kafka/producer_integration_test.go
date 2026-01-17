@@ -27,11 +27,11 @@ func TestEventProducer_Ping_Integration(t *testing.T) {
 	topic := "test-events-" + uuid.New().String()[:8]
 
 	writer := NewWriter([]string{broker}, topic)
-	defer writer.Close()
+	defer func() { _ = writer.Close() }()
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	producer := NewEventProducer(writer, logger)
-	defer producer.Close()
+	defer func() { _ = producer.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -51,14 +51,14 @@ func TestEventProducer_Produce_Integration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create topic: %v", err)
 	}
-	conn.Close()
+	_ = conn.Close()
 
 	writer := NewWriter([]string{broker}, topic)
-	defer writer.Close()
+	defer func() { _ = writer.Close() }()
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	producer := NewEventProducer(writer, logger)
-	defer producer.Close()
+	defer func() { _ = producer.Close() }()
 
 	event := &domain.Event{
 		EventID:   uuid.New(),
@@ -87,9 +87,9 @@ func TestEventProducer_Produce_Integration(t *testing.T) {
 		MaxBytes:  10e6,
 		MaxWait:   5 * time.Second,
 	})
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
-	reader.SetOffset(kafka.FirstOffset)
+	_ = reader.SetOffset(kafka.FirstOffset)
 
 	readCtx, readCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer readCancel()
@@ -128,16 +128,16 @@ func TestEventProducer_ProduceBatch_Integration(t *testing.T) {
 	}
 	controller, err := conn.Controller()
 	if err != nil {
-		conn.Close()
+		_ = conn.Close()
 		t.Fatalf("failed to get controller: %v", err)
 	}
-	conn.Close()
+	_ = conn.Close()
 
 	controllerConn, err := kafka.Dial("tcp", controller.Host+":"+fmt.Sprintf("%d", controller.Port))
 	if err != nil {
 		t.Fatalf("failed to dial controller: %v", err)
 	}
-	defer controllerConn.Close()
+	defer func() { _ = controllerConn.Close() }()
 
 	err = controllerConn.CreateTopics(kafka.TopicConfig{
 		Topic:             topic,
@@ -152,11 +152,11 @@ func TestEventProducer_ProduceBatch_Integration(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	writer := NewWriter([]string{broker}, topic)
-	defer writer.Close()
+	defer func() { _ = writer.Close() }()
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	producer := NewEventProducer(writer, logger)
-	defer producer.Close()
+	defer func() { _ = producer.Close() }()
 
 	events := []*domain.Event{
 		{
@@ -202,9 +202,9 @@ func TestEventProducer_ProduceBatch_Integration(t *testing.T) {
 		MaxBytes:  10e6,
 		MaxWait:   5 * time.Second,
 	})
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
-	reader.SetOffset(kafka.FirstOffset)
+	_ = reader.SetOffset(kafka.FirstOffset)
 
 	readCtx, readCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer readCancel()
@@ -226,11 +226,11 @@ func TestEventProducer_ProduceBatch_EmptyList_Integration(t *testing.T) {
 	topic := "test-events-empty-" + uuid.New().String()[:8]
 
 	writer := NewWriter([]string{broker}, topic)
-	defer writer.Close()
+	defer func() { _ = writer.Close() }()
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	producer := NewEventProducer(writer, logger)
-	defer producer.Close()
+	defer func() { _ = producer.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -247,11 +247,11 @@ func TestEventProducer_Produce_NilEvent_Integration(t *testing.T) {
 	topic := "test-events-nil-" + uuid.New().String()[:8]
 
 	writer := NewWriter([]string{broker}, topic)
-	defer writer.Close()
+	defer func() { _ = writer.Close() }()
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	producer := NewEventProducer(writer, logger)
-	defer producer.Close()
+	defer func() { _ = producer.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -267,11 +267,11 @@ func TestEngagementProducer_Ping_Integration(t *testing.T) {
 	topic := "test-engagements-" + uuid.New().String()[:8]
 
 	writer := NewEngagementWriter([]string{broker}, topic)
-	defer writer.Close()
+	defer func() { _ = writer.Close() }()
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	producer := NewEngagementProducer(writer, logger)
-	defer producer.Close()
+	defer func() { _ = producer.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -291,14 +291,14 @@ func TestEngagementProducer_Produce_Integration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create topic: %v", err)
 	}
-	conn.Close()
+	_ = conn.Close()
 
 	writer := NewEngagementWriter([]string{broker}, topic)
-	defer writer.Close()
+	defer func() { _ = writer.Close() }()
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	producer := NewEngagementProducer(writer, logger)
-	defer producer.Close()
+	defer func() { _ = producer.Close() }()
 
 	event := &domain.EngagementEvent{
 		EventID:        uuid.New(),
@@ -326,9 +326,9 @@ func TestEngagementProducer_Produce_Integration(t *testing.T) {
 		MaxBytes:  10e6,
 		MaxWait:   5 * time.Second,
 	})
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
-	reader.SetOffset(kafka.FirstOffset)
+	_ = reader.SetOffset(kafka.FirstOffset)
 
 	readCtx, readCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer readCancel()
@@ -366,14 +366,14 @@ func TestEngagementProducer_ProduceBatch_Integration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create topic: %v", err)
 	}
-	conn.Close()
+	_ = conn.Close()
 
 	writer := NewEngagementWriter([]string{broker}, topic)
-	defer writer.Close()
+	defer func() { _ = writer.Close() }()
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	producer := NewEngagementProducer(writer, logger)
-	defer producer.Close()
+	defer func() { _ = producer.Close() }()
 
 	events := []*domain.EngagementEvent{
 		{
@@ -409,9 +409,9 @@ func TestEngagementProducer_ProduceBatch_Integration(t *testing.T) {
 		MaxBytes:  10e6,
 		MaxWait:   5 * time.Second,
 	})
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
-	reader.SetOffset(kafka.FirstOffset)
+	_ = reader.SetOffset(kafka.FirstOffset)
 
 	readCtx, readCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer readCancel()
@@ -433,11 +433,11 @@ func TestEngagementProducer_Produce_NilEvent_Integration(t *testing.T) {
 	topic := "test-engagements-nil-" + uuid.New().String()[:8]
 
 	writer := NewEngagementWriter([]string{broker}, topic)
-	defer writer.Close()
+	defer func() { _ = writer.Close() }()
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	producer := NewEngagementProducer(writer, logger)
-	defer producer.Close()
+	defer func() { _ = producer.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -456,7 +456,7 @@ func TestNewWriter_Integration(t *testing.T) {
 	if writer == nil {
 		t.Fatal("NewWriter returned nil")
 	}
-	defer writer.Close()
+	defer func() { _ = writer.Close() }()
 
 	if writer.Topic != topic {
 		t.Errorf("expected topic %s, got %s", topic, writer.Topic)
@@ -481,7 +481,7 @@ func TestNewWriterWithConfig_Integration(t *testing.T) {
 	if writer == nil {
 		t.Fatal("NewWriterWithConfig returned nil")
 	}
-	defer writer.Close()
+	defer func() { _ = writer.Close() }()
 
 	if writer.Topic != topic {
 		t.Errorf("expected topic %s, got %s", topic, writer.Topic)
@@ -528,7 +528,7 @@ func TestNewEngagementWriter_Integration(t *testing.T) {
 	if writer == nil {
 		t.Fatal("NewEngagementWriter returned nil")
 	}
-	defer writer.Close()
+	defer func() { _ = writer.Close() }()
 
 	if writer.Topic != topic {
 		t.Errorf("expected topic %s, got %s", topic, writer.Topic)

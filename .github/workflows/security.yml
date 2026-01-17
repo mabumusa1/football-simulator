@@ -74,12 +74,12 @@ jobs:
       - name: Build API
         run: |
           cd apps/api
-          go build -o /tmp/api ./...
+          go build -o /tmp/api .
 
       - name: Build Consumer
         run: |
           cd apps/consumer
-          go build -o /tmp/consumer ./...
+          go build -o /tmp/consumer .
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4

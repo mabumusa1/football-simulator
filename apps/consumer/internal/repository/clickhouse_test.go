@@ -74,6 +74,7 @@ type MockBatch struct {
 	ColumnFunc       func(int) driver.BatchColumn
 	IsSentFunc       func() bool
 	RowsFunc         func() int
+	CloseFunc        func() error
 	AppendCount      int
 }
 
@@ -132,6 +133,13 @@ func (m *MockBatch) Rows() int {
 		return m.RowsFunc()
 	}
 	return m.AppendCount
+}
+
+func (m *MockBatch) Close() error {
+	if m.CloseFunc != nil {
+		return m.CloseFunc()
+	}
+	return nil
 }
 
 func newTestLogger() *slog.Logger {
