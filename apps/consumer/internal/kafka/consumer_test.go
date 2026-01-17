@@ -82,6 +82,20 @@ func createTestEvent() *domain.Event {
 	}
 }
 
+// ensureTestTopic triggers topic auto-creation before tests write to it.
+// This is needed because kafka-go's Writer alone doesn't reliably trigger
+// topic creation on the broker.
+func ensureTestTopic(t *testing.T, topic string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	conn, err := kafka.DialLeader(ctx, "tcp", getKafkaBroker(), topic, 0)
+	if err != nil {
+		t.Fatalf("failed to ensure topic %s exists: %v", topic, err)
+	}
+	_ = conn.Close()
+}
+
 // =============================================================================
 // NewBatchConsumer Tests
 // =============================================================================
@@ -308,6 +322,9 @@ func TestBatchConsumer_ConsumesProducedMessages(t *testing.T) {
 	topic := "test-consume-topic-" + uuid.New().String()[:8]
 	groupID := "test-group-" + uuid.New().String()[:8]
 
+	// Ensure topic exists before writing
+	ensureTestTopic(t, topic)
+
 	// Create a producer to write test messages
 	writer := &kafka.Writer{
 		Addr:         kafka.TCP(brokers...),
@@ -387,6 +404,9 @@ func TestBatchConsumer_MultipleBatches(t *testing.T) {
 	brokers := []string{getKafkaBroker()}
 	topic := "test-batch-topic-" + uuid.New().String()[:8]
 	groupID := "test-group-" + uuid.New().String()[:8]
+
+	// Ensure topic exists before writing
+	ensureTestTopic(t, topic)
 
 	// Create a producer
 	writer := &kafka.Writer{
@@ -653,6 +673,9 @@ func TestBatchConsumer_ConcurrentProducers(t *testing.T) {
 	brokers := []string{getKafkaBroker()}
 	topic := "test-concurrent-topic-" + uuid.New().String()[:8]
 	groupID := "test-group-" + uuid.New().String()[:8]
+
+	// Ensure topic exists before writing
+	ensureTestTopic(t, topic)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
