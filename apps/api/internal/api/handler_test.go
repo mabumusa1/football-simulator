@@ -49,6 +49,16 @@ func setupTestProducers(t *testing.T) (*kafka.EventProducer, *kafka.EngagementPr
 	eventTopic := "test-events-" + uuid.New().String()[:8]
 	engagementTopic := "test-engagements-" + uuid.New().String()[:8]
 
+	// Ensure topics exist before creating writers (triggers auto-creation on broker)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := kafka.EnsureTopic(ctx, broker, eventTopic); err != nil {
+		t.Fatalf("failed to ensure event topic %s exists: %v", eventTopic, err)
+	}
+	if err := kafka.EnsureTopic(ctx, broker, engagementTopic); err != nil {
+		t.Fatalf("failed to ensure engagement topic %s exists: %v", engagementTopic, err)
+	}
+
 	eventWriter := kafka.NewWriter([]string{broker}, eventTopic)
 	engagementWriter := kafka.NewEngagementWriter([]string{broker}, engagementTopic)
 
