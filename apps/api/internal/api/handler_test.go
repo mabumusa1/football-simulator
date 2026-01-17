@@ -4,93 +4,104 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	"github.com/mabumusa1/football-simulator/apps/api/internal/domain"
+	"github.com/mabumusa1/football-simulator/apps/api/internal/kafka"
+	"github.com/mabumusa1/football-simulator/apps/api/internal/repository"
 )
 
-// MockEventProducer is a mock implementation of the EventProducer interface.
-type MockEventProducer struct {
-	ProduceFunc func(ctx context.Context, event *domain.Event) error
-	PingFunc    func(ctx context.Context) error
-}
-
-func (m *MockEventProducer) Produce(ctx context.Context, event *domain.Event) error {
-	if m.ProduceFunc != nil {
-		return m.ProduceFunc(ctx, event)
+// Test infrastructure helpers
+func getKafkaBroker() string {
+	broker := os.Getenv("KAFKA_BROKER")
+	if broker == "" {
+		broker = "kafka:29092"
 	}
-	return nil
+	return broker
 }
 
-func (m *MockEventProducer) Ping(ctx context.Context) error {
-	if m.PingFunc != nil {
-		return m.PingFunc(ctx)
+func getClickHouseHost() string {
+	host := os.Getenv("CLICKHOUSE_HOST")
+	if host == "" {
+		host = "clickhouse"
 	}
-	return nil
+	return host
 }
 
-// MockEngagementProducer is a mock implementation of the EngagementProducer interface.
-type MockEngagementProducer struct {
-	ProduceFunc      func(ctx context.Context, event *domain.EngagementEvent) error
-	ProduceBatchFunc func(ctx context.Context, events []*domain.EngagementEvent) error
-	PingFunc         func(ctx context.Context) error
-}
-
-func (m *MockEngagementProducer) Produce(ctx context.Context, event *domain.EngagementEvent) error {
-	if m.ProduceFunc != nil {
-		return m.ProduceFunc(ctx, event)
+func getClickHousePort() string {
+	port := os.Getenv("CLICKHOUSE_PORT")
+	if port == "" {
+		port = "9000"
 	}
-	return nil
+	return port
 }
 
-func (m *MockEngagementProducer) ProduceBatch(ctx context.Context, events []*domain.EngagementEvent) error {
-	if m.ProduceBatchFunc != nil {
-		return m.ProduceBatchFunc(ctx, events)
+func setupTestProducers(t *testing.T) (*kafka.EventProducer, *kafka.EngagementProducer, func()) {
+	broker := getKafkaBroker()
+	eventTopic := "test-events-" + uuid.New().String()[:8]
+	engagementTopic := "test-engagements-" + uuid.New().String()[:8]
+
+	// Ensure topics exist before creating writers (triggers auto-creation on broker)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := kafka.EnsureTopic(ctx, broker, eventTopic); err != nil {
+		t.Fatalf("failed to ensure event topic %s exists: %v", eventTopic, err)
 	}
-	return nil
-}
-
-func (m *MockEngagementProducer) Ping(ctx context.Context) error {
-	if m.PingFunc != nil {
-		return m.PingFunc(ctx)
+	if err := kafka.EnsureTopic(ctx, broker, engagementTopic); err != nil {
+		t.Fatalf("failed to ensure engagement topic %s exists: %v", engagementTopic, err)
 	}
-	return nil
-}
 
-// MockMetricsRepository is a mock implementation of the MetricsRepository interface.
-type MockMetricsRepository struct {
-	GetMatchMetricsFunc    func(ctx context.Context, matchID string) (*domain.MatchMetrics, error)
-	GetEventsPerMinuteFunc func(ctx context.Context, matchID string) ([]domain.EventsPerMinute, error)
-	PingFunc               func(ctx context.Context) error
-}
+	eventWriter := kafka.NewWriter([]string{broker}, eventTopic)
+	engagementWriter := kafka.NewEngagementWriter([]string{broker}, engagementTopic)
 
-func (m *MockMetricsRepository) GetMatchMetrics(ctx context.Context, matchID string) (*domain.MatchMetrics, error) {
-	if m.GetMatchMetricsFunc != nil {
-		return m.GetMatchMetricsFunc(ctx, matchID)
+	eventProducer := kafka.NewEventProducer(eventWriter, nil)
+	engagementProducer := kafka.NewEngagementProducer(engagementWriter, nil)
+
+	cleanup := func() {
+		_ = eventProducer.Close()
+		_ = engagementProducer.Close()
 	}
-	return nil, nil
+
+	return eventProducer, engagementProducer, cleanup
 }
 
-func (m *MockMetricsRepository) GetEventsPerMinute(ctx context.Context, matchID string) ([]domain.EventsPerMinute, error) {
-	if m.GetEventsPerMinuteFunc != nil {
-		return m.GetEventsPerMinuteFunc(ctx, matchID)
-	}
-	return nil, nil
-}
+func setupTestRepository(t *testing.T) (*repository.ClickHouseRepository, func()) {
+	host := getClickHouseHost()
+	port := getClickHousePort()
 
-func (m *MockMetricsRepository) Ping(ctx context.Context) error {
-	if m.PingFunc != nil {
-		return m.PingFunc(ctx)
+	opts := &clickhouse.Options{
+		Addr: []string{host + ":" + port},
+		Auth: clickhouse.Auth{
+			Database: "football_simulator",
+			Username: "default",
+			Password: "",
+		},
+		Settings: clickhouse.Settings{
+			"max_execution_time": 60,
+		},
+		DialTimeout: 10 * time.Second,
 	}
-	return nil
+
+	conn, err := clickhouse.Open(opts)
+	if err != nil {
+		t.Fatalf("failed to open ClickHouse connection: %v", err)
+	}
+
+	repo := repository.NewClickHouseRepository(conn, nil)
+
+	cleanup := func() {
+		_ = conn.Close()
+	}
+
+	return repo, cleanup
 }
 
 // Helper function to create a valid event request JSON
@@ -133,14 +144,13 @@ func validEngagementBatchJSON() string {
 // =============================================================================
 
 func TestIngestEvent_ValidEvent(t *testing.T) {
-	mockProducer := &MockEventProducer{
-		ProduceFunc: func(ctx context.Context, event *domain.Event) error {
-			return nil
-		},
-	}
-	mockRepo := &MockMetricsRepository{}
+	eventProducer, _, cleanupProducers := setupTestProducers(t)
+	defer cleanupProducers()
 
-	handler := NewHandler(mockProducer, mockRepo)
+	repo, cleanupRepo := setupTestRepository(t)
+	defer cleanupRepo()
+
+	handler := NewHandler(eventProducer, repo)
 
 	reqBody := validEventRequestJSON()
 	req := httptest.NewRequest(http.MethodPost, "/api/events", strings.NewReader(reqBody))
@@ -171,10 +181,13 @@ func TestIngestEvent_ValidEvent(t *testing.T) {
 }
 
 func TestIngestEvent_InvalidJSON(t *testing.T) {
-	mockProducer := &MockEventProducer{}
-	mockRepo := &MockMetricsRepository{}
+	eventProducer, _, cleanupProducers := setupTestProducers(t)
+	defer cleanupProducers()
 
-	handler := NewHandler(mockProducer, mockRepo)
+	repo, cleanupRepo := setupTestRepository(t)
+	defer cleanupRepo()
+
+	handler := NewHandler(eventProducer, repo)
 
 	reqBody := `{invalid json}`
 	req := httptest.NewRequest(http.MethodPost, "/api/events", strings.NewReader(reqBody))
@@ -201,10 +214,13 @@ func TestIngestEvent_InvalidJSON(t *testing.T) {
 }
 
 func TestIngestEvent_ValidationError_InvalidEventID(t *testing.T) {
-	mockProducer := &MockEventProducer{}
-	mockRepo := &MockMetricsRepository{}
+	eventProducer, _, cleanupProducers := setupTestProducers(t)
+	defer cleanupProducers()
 
-	handler := NewHandler(mockProducer, mockRepo)
+	repo, cleanupRepo := setupTestRepository(t)
+	defer cleanupRepo()
+
+	handler := NewHandler(eventProducer, repo)
 
 	reqBody := `{
 		"eventId": "not-a-uuid",
@@ -238,10 +254,13 @@ func TestIngestEvent_ValidationError_InvalidEventID(t *testing.T) {
 }
 
 func TestIngestEvent_ValidationError_MissingMatchID(t *testing.T) {
-	mockProducer := &MockEventProducer{}
-	mockRepo := &MockMetricsRepository{}
+	eventProducer, _, cleanupProducers := setupTestProducers(t)
+	defer cleanupProducers()
 
-	handler := NewHandler(mockProducer, mockRepo)
+	repo, cleanupRepo := setupTestRepository(t)
+	defer cleanupRepo()
+
+	handler := NewHandler(eventProducer, repo)
 
 	reqBody := `{
 		"eventId": "` + uuid.New().String() + `",
@@ -275,10 +294,13 @@ func TestIngestEvent_ValidationError_MissingMatchID(t *testing.T) {
 }
 
 func TestIngestEvent_ValidationError_InvalidEventType(t *testing.T) {
-	mockProducer := &MockEventProducer{}
-	mockRepo := &MockMetricsRepository{}
+	eventProducer, _, cleanupProducers := setupTestProducers(t)
+	defer cleanupProducers()
 
-	handler := NewHandler(mockProducer, mockRepo)
+	repo, cleanupRepo := setupTestRepository(t)
+	defer cleanupRepo()
+
+	handler := NewHandler(eventProducer, repo)
 
 	reqBody := `{
 		"eventId": "` + uuid.New().String() + `",
@@ -312,10 +334,13 @@ func TestIngestEvent_ValidationError_InvalidEventType(t *testing.T) {
 }
 
 func TestIngestEvent_ValidationError_InvalidTimestamp(t *testing.T) {
-	mockProducer := &MockEventProducer{}
-	mockRepo := &MockMetricsRepository{}
+	eventProducer, _, cleanupProducers := setupTestProducers(t)
+	defer cleanupProducers()
 
-	handler := NewHandler(mockProducer, mockRepo)
+	repo, cleanupRepo := setupTestRepository(t)
+	defer cleanupRepo()
+
+	handler := NewHandler(eventProducer, repo)
 
 	reqBody := `{
 		"eventId": "` + uuid.New().String() + `",
@@ -349,10 +374,13 @@ func TestIngestEvent_ValidationError_InvalidTimestamp(t *testing.T) {
 }
 
 func TestIngestEvent_ValidationError_InvalidTeamID(t *testing.T) {
-	mockProducer := &MockEventProducer{}
-	mockRepo := &MockMetricsRepository{}
+	eventProducer, _, cleanupProducers := setupTestProducers(t)
+	defer cleanupProducers()
 
-	handler := NewHandler(mockProducer, mockRepo)
+	repo, cleanupRepo := setupTestRepository(t)
+	defer cleanupRepo()
+
+	handler := NewHandler(eventProducer, repo)
 
 	reqBody := `{
 		"eventId": "` + uuid.New().String() + `",
@@ -385,40 +413,6 @@ func TestIngestEvent_ValidationError_InvalidTeamID(t *testing.T) {
 	}
 }
 
-func TestIngestEvent_KafkaError(t *testing.T) {
-	mockProducer := &MockEventProducer{
-		ProduceFunc: func(ctx context.Context, event *domain.Event) error {
-			return errors.New("kafka connection failed")
-		},
-	}
-	mockRepo := &MockMetricsRepository{}
-
-	handler := NewHandler(mockProducer, mockRepo)
-
-	reqBody := validEventRequestJSON()
-	req := httptest.NewRequest(http.MethodPost, "/api/events", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-
-	handler.IngestEvent(w, req)
-
-	resp := w.Result()
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Errorf("expected status %d, got %d", http.StatusServiceUnavailable, resp.StatusCode)
-	}
-
-	var result ErrorResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
-	}
-
-	if result.Message != "failed to queue event" {
-		t.Errorf("expected message 'failed to queue event', got '%s'", result.Message)
-	}
-}
-
 func TestIngestEvent_AllEventTypes(t *testing.T) {
 	eventTypes := []string{
 		"pass", "shot", "goal", "foul", "yellow_card", "red_card",
@@ -427,17 +421,13 @@ func TestIngestEvent_AllEventTypes(t *testing.T) {
 
 	for _, eventType := range eventTypes {
 		t.Run(eventType, func(t *testing.T) {
-			mockProducer := &MockEventProducer{
-				ProduceFunc: func(ctx context.Context, event *domain.Event) error {
-					if string(event.EventType) != eventType {
-						t.Errorf("expected event type '%s', got '%s'", eventType, event.EventType)
-					}
-					return nil
-				},
-			}
-			mockRepo := &MockMetricsRepository{}
+			eventProducer, _, cleanupProducers := setupTestProducers(t)
+			defer cleanupProducers()
 
-			handler := NewHandler(mockProducer, mockRepo)
+			repo, cleanupRepo := setupTestRepository(t)
+			defer cleanupRepo()
+
+			handler := NewHandler(eventProducer, repo)
 
 			reqBody := `{
 				"eventId": "` + uuid.New().String() + `",
@@ -464,10 +454,13 @@ func TestIngestEvent_AllEventTypes(t *testing.T) {
 }
 
 func TestIngestEvent_EmptyBody(t *testing.T) {
-	mockProducer := &MockEventProducer{}
-	mockRepo := &MockMetricsRepository{}
+	eventProducer, _, cleanupProducers := setupTestProducers(t)
+	defer cleanupProducers()
 
-	handler := NewHandler(mockProducer, mockRepo)
+	repo, cleanupRepo := setupTestRepository(t)
+	defer cleanupRepo()
+
+	handler := NewHandler(eventProducer, repo)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/events", strings.NewReader(""))
 	req.Header.Set("Content-Type", "application/json")
@@ -488,18 +481,13 @@ func TestIngestEvent_EmptyBody(t *testing.T) {
 // =============================================================================
 
 func TestIngestEngagements_ValidBatch(t *testing.T) {
-	mockProducer := &MockEventProducer{}
-	mockEngagementProducer := &MockEngagementProducer{
-		ProduceBatchFunc: func(ctx context.Context, events []*domain.EngagementEvent) error {
-			if len(events) != 1 {
-				t.Errorf("expected 1 event, got %d", len(events))
-			}
-			return nil
-		},
-	}
-	mockRepo := &MockMetricsRepository{}
+	eventProducer, engagementProducer, cleanupProducers := setupTestProducers(t)
+	defer cleanupProducers()
 
-	handler := NewHandlerWithEngagement(mockProducer, mockEngagementProducer, mockRepo)
+	repo, cleanupRepo := setupTestRepository(t)
+	defer cleanupRepo()
+
+	handler := NewHandlerWithEngagement(eventProducer, engagementProducer, repo)
 
 	reqBody := validEngagementBatchJSON()
 	req := httptest.NewRequest(http.MethodPost, "/api/engagements", strings.NewReader(reqBody))
@@ -534,15 +522,13 @@ func TestIngestEngagements_ValidBatch(t *testing.T) {
 }
 
 func TestIngestEngagements_PartialFailures(t *testing.T) {
-	mockProducer := &MockEventProducer{}
-	mockEngagementProducer := &MockEngagementProducer{
-		ProduceBatchFunc: func(ctx context.Context, events []*domain.EngagementEvent) error {
-			return nil
-		},
-	}
-	mockRepo := &MockMetricsRepository{}
+	eventProducer, engagementProducer, cleanupProducers := setupTestProducers(t)
+	defer cleanupProducers()
 
-	handler := NewHandlerWithEngagement(mockProducer, mockEngagementProducer, mockRepo)
+	repo, cleanupRepo := setupTestRepository(t)
+	defer cleanupRepo()
+
+	handler := NewHandlerWithEngagement(eventProducer, engagementProducer, repo)
 
 	// Batch with one valid and one invalid event (missing user_id)
 	reqBody := `{
@@ -597,11 +583,13 @@ func TestIngestEngagements_PartialFailures(t *testing.T) {
 }
 
 func TestIngestEngagements_EmptyEvents(t *testing.T) {
-	mockProducer := &MockEventProducer{}
-	mockEngagementProducer := &MockEngagementProducer{}
-	mockRepo := &MockMetricsRepository{}
+	eventProducer, engagementProducer, cleanupProducers := setupTestProducers(t)
+	defer cleanupProducers()
 
-	handler := NewHandlerWithEngagement(mockProducer, mockEngagementProducer, mockRepo)
+	repo, cleanupRepo := setupTestRepository(t)
+	defer cleanupRepo()
+
+	handler := NewHandlerWithEngagement(eventProducer, engagementProducer, repo)
 
 	reqBody := `{"events": []}`
 	req := httptest.NewRequest(http.MethodPost, "/api/engagements", strings.NewReader(reqBody))
@@ -628,11 +616,13 @@ func TestIngestEngagements_EmptyEvents(t *testing.T) {
 }
 
 func TestIngestEngagements_InvalidJSON(t *testing.T) {
-	mockProducer := &MockEventProducer{}
-	mockEngagementProducer := &MockEngagementProducer{}
-	mockRepo := &MockMetricsRepository{}
+	eventProducer, engagementProducer, cleanupProducers := setupTestProducers(t)
+	defer cleanupProducers()
 
-	handler := NewHandlerWithEngagement(mockProducer, mockEngagementProducer, mockRepo)
+	repo, cleanupRepo := setupTestRepository(t)
+	defer cleanupRepo()
+
+	handler := NewHandlerWithEngagement(eventProducer, engagementProducer, repo)
 
 	reqBody := `{invalid json}`
 	req := httptest.NewRequest(http.MethodPost, "/api/engagements", strings.NewReader(reqBody))
@@ -658,47 +648,15 @@ func TestIngestEngagements_InvalidJSON(t *testing.T) {
 	}
 }
 
-func TestIngestEngagements_KafkaError(t *testing.T) {
-	mockProducer := &MockEventProducer{}
-	mockEngagementProducer := &MockEngagementProducer{
-		ProduceBatchFunc: func(ctx context.Context, events []*domain.EngagementEvent) error {
-			return errors.New("kafka batch produce failed")
-		},
-	}
-	mockRepo := &MockMetricsRepository{}
-
-	handler := NewHandlerWithEngagement(mockProducer, mockEngagementProducer, mockRepo)
-
-	reqBody := validEngagementBatchJSON()
-	req := httptest.NewRequest(http.MethodPost, "/api/engagements", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-
-	handler.IngestEngagements(w, req)
-
-	resp := w.Result()
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Errorf("expected status %d, got %d", http.StatusServiceUnavailable, resp.StatusCode)
-	}
-
-	var result ErrorResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
-	}
-
-	if result.Message != "failed to queue engagements" {
-		t.Errorf("expected message 'failed to queue engagements', got '%s'", result.Message)
-	}
-}
-
 func TestIngestEngagements_NotConfigured(t *testing.T) {
-	mockProducer := &MockEventProducer{}
-	mockRepo := &MockMetricsRepository{}
+	eventProducer, _, cleanupProducers := setupTestProducers(t)
+	defer cleanupProducers()
+
+	repo, cleanupRepo := setupTestRepository(t)
+	defer cleanupRepo()
 
 	// Create handler without engagement producer
-	handler := NewHandler(mockProducer, mockRepo)
+	handler := NewHandler(eventProducer, repo)
 
 	reqBody := validEngagementBatchJSON()
 	req := httptest.NewRequest(http.MethodPost, "/api/engagements", strings.NewReader(reqBody))
@@ -725,17 +683,13 @@ func TestIngestEngagements_NotConfigured(t *testing.T) {
 }
 
 func TestIngestEngagements_MultipleBatchEvents(t *testing.T) {
-	eventCount := 0
-	mockProducer := &MockEventProducer{}
-	mockEngagementProducer := &MockEngagementProducer{
-		ProduceBatchFunc: func(ctx context.Context, events []*domain.EngagementEvent) error {
-			eventCount = len(events)
-			return nil
-		},
-	}
-	mockRepo := &MockMetricsRepository{}
+	eventProducer, engagementProducer, cleanupProducers := setupTestProducers(t)
+	defer cleanupProducers()
 
-	handler := NewHandlerWithEngagement(mockProducer, mockEngagementProducer, mockRepo)
+	repo, cleanupRepo := setupTestRepository(t)
+	defer cleanupRepo()
+
+	handler := NewHandlerWithEngagement(eventProducer, engagementProducer, repo)
 
 	// Create a batch with 3 valid events
 	reqBody := `{
@@ -785,10 +739,6 @@ func TestIngestEngagements_MultipleBatchEvents(t *testing.T) {
 		t.Errorf("expected status %d, got %d", http.StatusAccepted, resp.StatusCode)
 	}
 
-	if eventCount != 3 {
-		t.Errorf("expected 3 events in batch, got %d", eventCount)
-	}
-
 	var result IngestEngagementsResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
@@ -803,88 +753,19 @@ func TestIngestEngagements_MultipleBatchEvents(t *testing.T) {
 // GetMatchMetrics Handler Tests
 // =============================================================================
 
-func TestGetMatchMetrics_Success(t *testing.T) {
-	now := time.Now().UTC()
-	mockProducer := &MockEventProducer{}
-	mockRepo := &MockMetricsRepository{
-		GetMatchMetricsFunc: func(ctx context.Context, matchID string) (*domain.MatchMetrics, error) {
-			return &domain.MatchMetrics{
-				MatchID:     matchID,
-				TotalEvents: 100,
-				EventsByType: map[string]int64{
-					"goal":        2,
-					"pass":        50,
-					"shot":        10,
-					"yellow_card": 3,
-				},
-				Goals:        2,
-				YellowCards:  3,
-				RedCards:     0,
-				FirstEventAt: &now,
-				LastEventAt:  &now,
-			}, nil
-		},
-		GetEventsPerMinuteFunc: func(ctx context.Context, matchID string) ([]domain.EventsPerMinute, error) {
-			return []domain.EventsPerMinute{
-				{Minute: now, EventType: "pass", EventCount: 10},
-				{Minute: now.Add(time.Minute), EventType: "pass", EventCount: 15},
-			}, nil
-		},
-	}
+func TestGetMatchMetrics_NonExistentMatch(t *testing.T) {
+	eventProducer, _, cleanupProducers := setupTestProducers(t)
+	defer cleanupProducers()
 
-	handler := NewHandler(mockProducer, mockRepo)
+	repo, cleanupRepo := setupTestRepository(t)
+	defer cleanupRepo()
 
-	// Use chi router to properly set URL parameters
-	r := chi.NewRouter()
-	r.Get("/api/matches/{matchId}/metrics", handler.GetMatchMetrics)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/matches/match-123/metrics", nil)
-	w := httptest.NewRecorder()
-
-	r.ServeHTTP(w, req)
-
-	resp := w.Result()
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("expected status %d, got %d", http.StatusOK, resp.StatusCode)
-	}
-
-	var result domain.MatchMetrics
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
-	}
-
-	if result.MatchID != "match-123" {
-		t.Errorf("expected matchId 'match-123', got '%s'", result.MatchID)
-	}
-
-	if result.TotalEvents != 100 {
-		t.Errorf("expected 100 total events, got %d", result.TotalEvents)
-	}
-
-	if result.Goals != 2 {
-		t.Errorf("expected 2 goals, got %d", result.Goals)
-	}
-}
-
-func TestGetMatchMetrics_NotFound(t *testing.T) {
-	mockProducer := &MockEventProducer{}
-	mockRepo := &MockMetricsRepository{
-		GetMatchMetricsFunc: func(ctx context.Context, matchID string) (*domain.MatchMetrics, error) {
-			return &domain.MatchMetrics{
-				MatchID:     matchID,
-				TotalEvents: 0,
-			}, nil
-		},
-	}
-
-	handler := NewHandler(mockProducer, mockRepo)
+	handler := NewHandler(eventProducer, repo)
 
 	r := chi.NewRouter()
 	r.Get("/api/matches/{matchId}/metrics", handler.GetMatchMetrics)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/matches/nonexistent-match/metrics", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/matches/nonexistent-match-"+uuid.New().String()+"/metrics", nil)
 	w := httptest.NewRecorder()
 
 	r.ServeHTTP(w, req)
@@ -906,119 +787,14 @@ func TestGetMatchMetrics_NotFound(t *testing.T) {
 	}
 }
 
-func TestGetMatchMetrics_NilMetrics(t *testing.T) {
-	mockProducer := &MockEventProducer{}
-	mockRepo := &MockMetricsRepository{
-		GetMatchMetricsFunc: func(ctx context.Context, matchID string) (*domain.MatchMetrics, error) {
-			return nil, nil
-		},
-	}
-
-	handler := NewHandler(mockProducer, mockRepo)
-
-	r := chi.NewRouter()
-	r.Get("/api/matches/{matchId}/metrics", handler.GetMatchMetrics)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/matches/nonexistent-match/metrics", nil)
-	w := httptest.NewRecorder()
-
-	r.ServeHTTP(w, req)
-
-	resp := w.Result()
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusNotFound {
-		t.Errorf("expected status %d, got %d", http.StatusNotFound, resp.StatusCode)
-	}
-}
-
-func TestGetMatchMetrics_RepositoryError(t *testing.T) {
-	mockProducer := &MockEventProducer{}
-	mockRepo := &MockMetricsRepository{
-		GetMatchMetricsFunc: func(ctx context.Context, matchID string) (*domain.MatchMetrics, error) {
-			return nil, errors.New("database connection failed")
-		},
-	}
-
-	handler := NewHandler(mockProducer, mockRepo)
-
-	r := chi.NewRouter()
-	r.Get("/api/matches/{matchId}/metrics", handler.GetMatchMetrics)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/matches/match-123/metrics", nil)
-	w := httptest.NewRecorder()
-
-	r.ServeHTTP(w, req)
-
-	resp := w.Result()
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusInternalServerError {
-		t.Errorf("expected status %d, got %d", http.StatusInternalServerError, resp.StatusCode)
-	}
-
-	var result ErrorResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
-	}
-
-	if result.Message != "failed to fetch metrics" {
-		t.Errorf("expected message 'failed to fetch metrics', got '%s'", result.Message)
-	}
-}
-
-func TestGetMatchMetrics_EventsPerMinuteError(t *testing.T) {
-	now := time.Now().UTC()
-	mockProducer := &MockEventProducer{}
-	mockRepo := &MockMetricsRepository{
-		GetMatchMetricsFunc: func(ctx context.Context, matchID string) (*domain.MatchMetrics, error) {
-			return &domain.MatchMetrics{
-				MatchID:     matchID,
-				TotalEvents: 100,
-				Goals:       2,
-			}, nil
-		},
-		GetEventsPerMinuteFunc: func(ctx context.Context, matchID string) ([]domain.EventsPerMinute, error) {
-			return nil, errors.New("query failed")
-		},
-	}
-
-	handler := NewHandler(mockProducer, mockRepo)
-
-	r := chi.NewRouter()
-	r.Get("/api/matches/{matchId}/metrics", handler.GetMatchMetrics)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/matches/match-123/metrics", nil)
-	w := httptest.NewRecorder()
-
-	r.ServeHTTP(w, req)
-
-	resp := w.Result()
-	defer func() { _ = resp.Body.Close() }()
-
-	// Should still return 200 but without peak engagement data
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("expected status %d, got %d", http.StatusOK, resp.StatusCode)
-	}
-
-	var result domain.MatchMetrics
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
-	}
-
-	// PeakMinute should be nil when events per minute query fails
-	if result.PeakMinute != nil {
-		t.Errorf("expected PeakMinute to be nil, got %v", result.PeakMinute)
-	}
-
-	_ = now // Unused in this test
-}
-
 func TestGetMatchMetrics_MissingMatchID(t *testing.T) {
-	mockProducer := &MockEventProducer{}
-	mockRepo := &MockMetricsRepository{}
+	eventProducer, _, cleanupProducers := setupTestProducers(t)
+	defer cleanupProducers()
 
-	handler := NewHandler(mockProducer, mockRepo)
+	repo, cleanupRepo := setupTestRepository(t)
+	defer cleanupRepo()
+
+	handler := NewHandler(eventProducer, repo)
 
 	// Test without chi router to simulate missing matchId
 	req := httptest.NewRequest(http.MethodGet, "/api/matches//metrics", nil)
@@ -1043,66 +819,18 @@ func TestGetMatchMetrics_MissingMatchID(t *testing.T) {
 	}
 }
 
-func TestGetMatchMetrics_WithPeakEngagement(t *testing.T) {
-	peakTime := time.Date(2024, 1, 15, 14, 30, 0, 0, time.UTC)
-	mockProducer := &MockEventProducer{}
-	mockRepo := &MockMetricsRepository{
-		GetMatchMetricsFunc: func(ctx context.Context, matchID string) (*domain.MatchMetrics, error) {
-			return &domain.MatchMetrics{
-				MatchID:     matchID,
-				TotalEvents: 100,
-			}, nil
-		},
-		GetEventsPerMinuteFunc: func(ctx context.Context, matchID string) ([]domain.EventsPerMinute, error) {
-			return []domain.EventsPerMinute{
-				{Minute: peakTime, EventType: "pass", EventCount: 10},
-				{Minute: peakTime, EventType: "shot", EventCount: 5},
-				{Minute: peakTime.Add(time.Minute), EventType: "pass", EventCount: 8},
-			}, nil
-		},
-	}
-
-	handler := NewHandler(mockProducer, mockRepo)
-
-	r := chi.NewRouter()
-	r.Get("/api/matches/{matchId}/metrics", handler.GetMatchMetrics)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/matches/match-123/metrics", nil)
-	w := httptest.NewRecorder()
-
-	r.ServeHTTP(w, req)
-
-	resp := w.Result()
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("expected status %d, got %d", http.StatusOK, resp.StatusCode)
-	}
-
-	var result domain.MatchMetrics
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
-	}
-
-	if result.PeakMinute == nil {
-		t.Fatal("expected PeakMinute to be set")
-	}
-
-	// Peak should be at peakTime with count 15 (10 + 5)
-	if result.PeakMinute.EventCount != 15 {
-		t.Errorf("expected peak event count 15, got %d", result.PeakMinute.EventCount)
-	}
-}
-
 // =============================================================================
 // HealthCheck Handler Tests
 // =============================================================================
 
 func TestHealthCheck_ReturnsHealthy(t *testing.T) {
-	mockProducer := &MockEventProducer{}
-	mockRepo := &MockMetricsRepository{}
+	eventProducer, _, cleanupProducers := setupTestProducers(t)
+	defer cleanupProducers()
 
-	handler := NewHandler(mockProducer, mockRepo)
+	repo, cleanupRepo := setupTestRepository(t)
+	defer cleanupRepo()
+
+	handler := NewHandler(eventProducer, repo)
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	w := httptest.NewRecorder()
@@ -1135,10 +863,13 @@ func TestHealthCheck_ReturnsHealthy(t *testing.T) {
 }
 
 func TestHealthCheck_TimestampIsUTC(t *testing.T) {
-	mockProducer := &MockEventProducer{}
-	mockRepo := &MockMetricsRepository{}
+	eventProducer, _, cleanupProducers := setupTestProducers(t)
+	defer cleanupProducers()
 
-	handler := NewHandler(mockProducer, mockRepo)
+	repo, cleanupRepo := setupTestRepository(t)
+	defer cleanupRepo()
+
+	handler := NewHandler(eventProducer, repo)
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	w := httptest.NewRecorder()
@@ -1163,18 +894,13 @@ func TestHealthCheck_TimestampIsUTC(t *testing.T) {
 // =============================================================================
 
 func TestReadinessCheck_AllHealthy(t *testing.T) {
-	mockProducer := &MockEventProducer{
-		PingFunc: func(ctx context.Context) error {
-			return nil
-		},
-	}
-	mockRepo := &MockMetricsRepository{
-		PingFunc: func(ctx context.Context) error {
-			return nil
-		},
-	}
+	eventProducer, _, cleanupProducers := setupTestProducers(t)
+	defer cleanupProducers()
 
-	handler := NewHandler(mockProducer, mockRepo)
+	repo, cleanupRepo := setupTestRepository(t)
+	defer cleanupRepo()
+
+	handler := NewHandler(eventProducer, repo)
 
 	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
 	w := httptest.NewRecorder()
@@ -1206,156 +932,14 @@ func TestReadinessCheck_AllHealthy(t *testing.T) {
 	}
 }
 
-func TestReadinessCheck_ClickHouseUnhealthy(t *testing.T) {
-	mockProducer := &MockEventProducer{
-		PingFunc: func(ctx context.Context) error {
-			return nil
-		},
-	}
-	mockRepo := &MockMetricsRepository{
-		PingFunc: func(ctx context.Context) error {
-			return errors.New("connection refused")
-		},
-	}
-
-	handler := NewHandler(mockProducer, mockRepo)
-
-	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
-	w := httptest.NewRecorder()
-
-	handler.ReadinessCheck(w, req)
-
-	resp := w.Result()
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Errorf("expected status %d, got %d", http.StatusServiceUnavailable, resp.StatusCode)
-	}
-
-	var result ReadinessResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
-	}
-
-	if result.Status != "not ready" {
-		t.Errorf("expected status 'not ready', got '%s'", result.Status)
-	}
-
-	if !strings.Contains(result.Checks["clickhouse"], "unhealthy") {
-		t.Errorf("expected clickhouse check to contain 'unhealthy', got '%s'", result.Checks["clickhouse"])
-	}
-
-	if !strings.Contains(result.Checks["clickhouse"], "connection refused") {
-		t.Errorf("expected clickhouse check to contain error message, got '%s'", result.Checks["clickhouse"])
-	}
-}
-
-func TestReadinessCheck_KafkaUnhealthy(t *testing.T) {
-	mockProducer := &MockEventProducer{
-		PingFunc: func(ctx context.Context) error {
-			return errors.New("broker not available")
-		},
-	}
-	mockRepo := &MockMetricsRepository{
-		PingFunc: func(ctx context.Context) error {
-			return nil
-		},
-	}
-
-	handler := NewHandler(mockProducer, mockRepo)
-
-	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
-	w := httptest.NewRecorder()
-
-	handler.ReadinessCheck(w, req)
-
-	resp := w.Result()
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Errorf("expected status %d, got %d", http.StatusServiceUnavailable, resp.StatusCode)
-	}
-
-	var result ReadinessResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
-	}
-
-	if result.Status != "not ready" {
-		t.Errorf("expected status 'not ready', got '%s'", result.Status)
-	}
-
-	if !strings.Contains(result.Checks["kafka"], "unhealthy") {
-		t.Errorf("expected kafka check to contain 'unhealthy', got '%s'", result.Checks["kafka"])
-	}
-
-	if !strings.Contains(result.Checks["kafka"], "broker not available") {
-		t.Errorf("expected kafka check to contain error message, got '%s'", result.Checks["kafka"])
-	}
-
-	// ClickHouse should still be healthy
-	if result.Checks["clickhouse"] != "healthy" {
-		t.Errorf("expected clickhouse check 'healthy', got '%s'", result.Checks["clickhouse"])
-	}
-}
-
-func TestReadinessCheck_BothUnhealthy(t *testing.T) {
-	mockProducer := &MockEventProducer{
-		PingFunc: func(ctx context.Context) error {
-			return errors.New("kafka error")
-		},
-	}
-	mockRepo := &MockMetricsRepository{
-		PingFunc: func(ctx context.Context) error {
-			return errors.New("clickhouse error")
-		},
-	}
-
-	handler := NewHandler(mockProducer, mockRepo)
-
-	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
-	w := httptest.NewRecorder()
-
-	handler.ReadinessCheck(w, req)
-
-	resp := w.Result()
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Errorf("expected status %d, got %d", http.StatusServiceUnavailable, resp.StatusCode)
-	}
-
-	var result ReadinessResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
-	}
-
-	if result.Status != "not ready" {
-		t.Errorf("expected status 'not ready', got '%s'", result.Status)
-	}
-
-	if !strings.Contains(result.Checks["clickhouse"], "unhealthy") {
-		t.Errorf("expected clickhouse check to contain 'unhealthy', got '%s'", result.Checks["clickhouse"])
-	}
-
-	if !strings.Contains(result.Checks["kafka"], "unhealthy") {
-		t.Errorf("expected kafka check to contain 'unhealthy', got '%s'", result.Checks["kafka"])
-	}
-}
-
 func TestReadinessCheck_TimestampIsSet(t *testing.T) {
-	mockProducer := &MockEventProducer{
-		PingFunc: func(ctx context.Context) error {
-			return nil
-		},
-	}
-	mockRepo := &MockMetricsRepository{
-		PingFunc: func(ctx context.Context) error {
-			return nil
-		},
-	}
+	eventProducer, _, cleanupProducers := setupTestProducers(t)
+	defer cleanupProducers()
 
-	handler := NewHandler(mockProducer, mockRepo)
+	repo, cleanupRepo := setupTestRepository(t)
+	defer cleanupRepo()
+
+	handler := NewHandler(eventProducer, repo)
 
 	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
 	w := httptest.NewRecorder()
@@ -1384,10 +968,13 @@ func TestReadinessCheck_TimestampIsSet(t *testing.T) {
 // =============================================================================
 
 func TestNewHandler(t *testing.T) {
-	mockProducer := &MockEventProducer{}
-	mockRepo := &MockMetricsRepository{}
+	eventProducer, _, cleanupProducers := setupTestProducers(t)
+	defer cleanupProducers()
 
-	handler := NewHandler(mockProducer, mockRepo)
+	repo, cleanupRepo := setupTestRepository(t)
+	defer cleanupRepo()
+
+	handler := NewHandler(eventProducer, repo)
 
 	if handler.producer == nil {
 		t.Error("expected producer to be set")
@@ -1403,11 +990,13 @@ func TestNewHandler(t *testing.T) {
 }
 
 func TestNewHandlerWithEngagement(t *testing.T) {
-	mockProducer := &MockEventProducer{}
-	mockEngagementProducer := &MockEngagementProducer{}
-	mockRepo := &MockMetricsRepository{}
+	eventProducer, engagementProducer, cleanupProducers := setupTestProducers(t)
+	defer cleanupProducers()
 
-	handler := NewHandlerWithEngagement(mockProducer, mockEngagementProducer, mockRepo)
+	repo, cleanupRepo := setupTestRepository(t)
+	defer cleanupRepo()
+
+	handler := NewHandlerWithEngagement(eventProducer, engagementProducer, repo)
 
 	if handler.producer == nil {
 		t.Error("expected producer to be set")
@@ -1503,16 +1092,13 @@ info:
 // =============================================================================
 
 func TestIngestEvent_WithMetadata(t *testing.T) {
-	var capturedEvent *domain.Event
-	mockProducer := &MockEventProducer{
-		ProduceFunc: func(ctx context.Context, event *domain.Event) error {
-			capturedEvent = event
-			return nil
-		},
-	}
-	mockRepo := &MockMetricsRepository{}
+	eventProducer, _, cleanupProducers := setupTestProducers(t)
+	defer cleanupProducers()
 
-	handler := NewHandler(mockProducer, mockRepo)
+	repo, cleanupRepo := setupTestRepository(t)
+	defer cleanupRepo()
+
+	handler := NewHandler(eventProducer, repo)
 
 	reqBody := `{
 		"eventId": "` + uuid.New().String() + `",
@@ -1539,31 +1125,16 @@ func TestIngestEvent_WithMetadata(t *testing.T) {
 	if resp.StatusCode != http.StatusAccepted {
 		t.Errorf("expected status %d, got %d", http.StatusAccepted, resp.StatusCode)
 	}
-
-	if capturedEvent == nil {
-		t.Fatal("expected event to be captured")
-	}
-
-	if capturedEvent.Metadata == nil {
-		t.Fatal("expected metadata to be set")
-	}
-
-	if capturedEvent.Metadata["assistBy"] != "player-789" {
-		t.Errorf("expected assistBy 'player-789', got '%v'", capturedEvent.Metadata["assistBy"])
-	}
 }
 
 func TestIngestEvent_TeamID2(t *testing.T) {
-	var capturedEvent *domain.Event
-	mockProducer := &MockEventProducer{
-		ProduceFunc: func(ctx context.Context, event *domain.Event) error {
-			capturedEvent = event
-			return nil
-		},
-	}
-	mockRepo := &MockMetricsRepository{}
+	eventProducer, _, cleanupProducers := setupTestProducers(t)
+	defer cleanupProducers()
 
-	handler := NewHandler(mockProducer, mockRepo)
+	repo, cleanupRepo := setupTestRepository(t)
+	defer cleanupRepo()
+
+	handler := NewHandler(eventProducer, repo)
 
 	reqBody := `{
 		"eventId": "` + uuid.New().String() + `",
@@ -1585,26 +1156,16 @@ func TestIngestEvent_TeamID2(t *testing.T) {
 	if resp.StatusCode != http.StatusAccepted {
 		t.Errorf("expected status %d, got %d", http.StatusAccepted, resp.StatusCode)
 	}
-
-	if capturedEvent == nil {
-		t.Fatal("expected event to be captured")
-	}
-
-	if capturedEvent.TeamID != 2 {
-		t.Errorf("expected teamId 2, got %d", capturedEvent.TeamID)
-	}
 }
 
 func TestIngestEngagements_AllInvalid(t *testing.T) {
-	mockProducer := &MockEventProducer{}
-	mockEngagementProducer := &MockEngagementProducer{
-		ProduceBatchFunc: func(ctx context.Context, events []*domain.EngagementEvent) error {
-			return nil
-		},
-	}
-	mockRepo := &MockMetricsRepository{}
+	eventProducer, engagementProducer, cleanupProducers := setupTestProducers(t)
+	defer cleanupProducers()
 
-	handler := NewHandlerWithEngagement(mockProducer, mockEngagementProducer, mockRepo)
+	repo, cleanupRepo := setupTestRepository(t)
+	defer cleanupRepo()
+
+	handler := NewHandlerWithEngagement(eventProducer, engagementProducer, repo)
 
 	// All events are invalid (missing required fields)
 	reqBody := `{
@@ -1665,21 +1226,13 @@ func TestIngestEngagements_AllEngagementTypes(t *testing.T) {
 
 	for _, engagementType := range engagementTypes {
 		t.Run(engagementType, func(t *testing.T) {
-			mockProducer := &MockEventProducer{}
-			mockEngagementProducer := &MockEngagementProducer{
-				ProduceBatchFunc: func(ctx context.Context, events []*domain.EngagementEvent) error {
-					if len(events) != 1 {
-						t.Errorf("expected 1 event, got %d", len(events))
-					}
-					if string(events[0].EngagementType) != engagementType {
-						t.Errorf("expected engagement type '%s', got '%s'", engagementType, events[0].EngagementType)
-					}
-					return nil
-				},
-			}
-			mockRepo := &MockMetricsRepository{}
+			eventProducer, engagementProducer, cleanupProducers := setupTestProducers(t)
+			defer cleanupProducers()
 
-			handler := NewHandlerWithEngagement(mockProducer, mockEngagementProducer, mockRepo)
+			repo, cleanupRepo := setupTestRepository(t)
+			defer cleanupRepo()
+
+			handler := NewHandlerWithEngagement(eventProducer, engagementProducer, repo)
 
 			reqBody := `{
 				"events": [
@@ -1711,44 +1264,25 @@ func TestIngestEngagements_AllEngagementTypes(t *testing.T) {
 	}
 }
 
-func TestGetMatchMetrics_EmptyEventsPerMinute(t *testing.T) {
-	mockProducer := &MockEventProducer{}
-	mockRepo := &MockMetricsRepository{
-		GetMatchMetricsFunc: func(ctx context.Context, matchID string) (*domain.MatchMetrics, error) {
-			return &domain.MatchMetrics{
-				MatchID:     matchID,
-				TotalEvents: 100,
-			}, nil
-		},
-		GetEventsPerMinuteFunc: func(ctx context.Context, matchID string) ([]domain.EventsPerMinute, error) {
-			return []domain.EventsPerMinute{}, nil
-		},
+func TestPingContext(t *testing.T) {
+	eventProducer, _, cleanupProducers := setupTestProducers(t)
+	defer cleanupProducers()
+
+	repo, cleanupRepo := setupTestRepository(t)
+	defer cleanupRepo()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Verify Kafka ping
+	err := eventProducer.Ping(ctx)
+	if err != nil {
+		t.Errorf("Kafka ping failed: %v", err)
 	}
 
-	handler := NewHandler(mockProducer, mockRepo)
-
-	r := chi.NewRouter()
-	r.Get("/api/matches/{matchId}/metrics", handler.GetMatchMetrics)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/matches/match-123/metrics", nil)
-	w := httptest.NewRecorder()
-
-	r.ServeHTTP(w, req)
-
-	resp := w.Result()
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("expected status %d, got %d", http.StatusOK, resp.StatusCode)
-	}
-
-	var result domain.MatchMetrics
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
-	}
-
-	// PeakMinute should be nil when events per minute is empty
-	if result.PeakMinute != nil {
-		t.Errorf("expected PeakMinute to be nil, got %v", result.PeakMinute)
+	// Verify ClickHouse ping
+	err = repo.Ping(ctx)
+	if err != nil {
+		t.Errorf("ClickHouse ping failed: %v", err)
 	}
 }

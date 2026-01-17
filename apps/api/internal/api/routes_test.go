@@ -1,28 +1,25 @@
 package api
 
 import (
-	"context"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"testing"
-
-	"github.com/mabumusa1/football-simulator/apps/api/internal/domain"
 )
 
-// Note: MockEventProducer, MockEngagementProducer, and MockMetricsRepository
-// are defined in handler_test.go
-
 func TestNewRouter_CreatesRouter(t *testing.T) {
-	producer := &MockEventProducer{}
-	engagementProducer := &MockEngagementProducer{}
-	repository := &MockMetricsRepository{}
+	eventProducer, engagementProducer, cleanupProducers := setupTestProducers(t)
+	defer cleanupProducers()
+
+	repo, cleanupRepo := setupTestRepository(t)
+	defer cleanupRepo()
+
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	apiKey := "test-api-key"
 	openAPISpec := []byte("openapi: 3.0.0")
 
-	router := NewRouter(producer, engagementProducer, repository, logger, apiKey, openAPISpec)
+	router := NewRouter(eventProducer, engagementProducer, repo, logger, apiKey, openAPISpec)
 
 	if router == nil {
 		t.Fatal("NewRouter returned nil")
@@ -30,14 +27,15 @@ func TestNewRouter_CreatesRouter(t *testing.T) {
 }
 
 func TestNewRouter_RegistersHealthEndpoint(t *testing.T) {
-	producer := &MockEventProducer{}
-	engagementProducer := &MockEngagementProducer{}
-	repository := &MockMetricsRepository{
-		PingFunc: func(ctx context.Context) error { return nil },
-	}
+	eventProducer, engagementProducer, cleanupProducers := setupTestProducers(t)
+	defer cleanupProducers()
+
+	repo, cleanupRepo := setupTestRepository(t)
+	defer cleanupRepo()
+
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
-	router := NewRouter(producer, engagementProducer, repository, logger, "api-key", nil)
+	router := NewRouter(eventProducer, engagementProducer, repo, logger, "api-key", nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rr := httptest.NewRecorder()
@@ -50,16 +48,15 @@ func TestNewRouter_RegistersHealthEndpoint(t *testing.T) {
 }
 
 func TestNewRouter_RegistersReadyEndpoint(t *testing.T) {
-	producer := &MockEventProducer{
-		PingFunc: func(ctx context.Context) error { return nil },
-	}
-	engagementProducer := &MockEngagementProducer{}
-	repository := &MockMetricsRepository{
-		PingFunc: func(ctx context.Context) error { return nil },
-	}
+	eventProducer, engagementProducer, cleanupProducers := setupTestProducers(t)
+	defer cleanupProducers()
+
+	repo, cleanupRepo := setupTestRepository(t)
+	defer cleanupRepo()
+
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
-	router := NewRouter(producer, engagementProducer, repository, logger, "api-key", nil)
+	router := NewRouter(eventProducer, engagementProducer, repo, logger, "api-key", nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
 	rr := httptest.NewRecorder()
@@ -72,12 +69,15 @@ func TestNewRouter_RegistersReadyEndpoint(t *testing.T) {
 }
 
 func TestNewRouter_RegistersMetricsEndpoint(t *testing.T) {
-	producer := &MockEventProducer{}
-	engagementProducer := &MockEngagementProducer{}
-	repository := &MockMetricsRepository{}
+	eventProducer, engagementProducer, cleanupProducers := setupTestProducers(t)
+	defer cleanupProducers()
+
+	repo, cleanupRepo := setupTestRepository(t)
+	defer cleanupRepo()
+
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
-	router := NewRouter(producer, engagementProducer, repository, logger, "api-key", nil)
+	router := NewRouter(eventProducer, engagementProducer, repo, logger, "api-key", nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 	rr := httptest.NewRecorder()
@@ -91,12 +91,15 @@ func TestNewRouter_RegistersMetricsEndpoint(t *testing.T) {
 }
 
 func TestNewRouter_RegistersSwaggerUI(t *testing.T) {
-	producer := &MockEventProducer{}
-	engagementProducer := &MockEngagementProducer{}
-	repository := &MockMetricsRepository{}
+	eventProducer, engagementProducer, cleanupProducers := setupTestProducers(t)
+	defer cleanupProducers()
+
+	repo, cleanupRepo := setupTestRepository(t)
+	defer cleanupRepo()
+
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
-	router := NewRouter(producer, engagementProducer, repository, logger, "api-key", nil)
+	router := NewRouter(eventProducer, engagementProducer, repo, logger, "api-key", nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
@@ -114,13 +117,16 @@ func TestNewRouter_RegistersSwaggerUI(t *testing.T) {
 }
 
 func TestNewRouter_RegistersOpenAPISpec(t *testing.T) {
-	producer := &MockEventProducer{}
-	engagementProducer := &MockEngagementProducer{}
-	repository := &MockMetricsRepository{}
+	eventProducer, engagementProducer, cleanupProducers := setupTestProducers(t)
+	defer cleanupProducers()
+
+	repo, cleanupRepo := setupTestRepository(t)
+	defer cleanupRepo()
+
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	spec := []byte("openapi: 3.0.0\ninfo:\n  title: Test API")
 
-	router := NewRouter(producer, engagementProducer, repository, logger, "api-key", spec)
+	router := NewRouter(eventProducer, engagementProducer, repo, logger, "api-key", spec)
 
 	req := httptest.NewRequest(http.MethodGet, "/openapi.yaml", nil)
 	rr := httptest.NewRecorder()
@@ -142,12 +148,15 @@ func TestNewRouter_RegistersOpenAPISpec(t *testing.T) {
 }
 
 func TestNewRouter_ProtectsAPIRoutes_WithoutAPIKey(t *testing.T) {
-	producer := &MockEventProducer{}
-	engagementProducer := &MockEngagementProducer{}
-	repository := &MockMetricsRepository{}
+	eventProducer, engagementProducer, cleanupProducers := setupTestProducers(t)
+	defer cleanupProducers()
+
+	repo, cleanupRepo := setupTestRepository(t)
+	defer cleanupRepo()
+
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
-	router := NewRouter(producer, engagementProducer, repository, logger, "secret-key", nil)
+	router := NewRouter(eventProducer, engagementProducer, repo, logger, "secret-key", nil)
 
 	// Try to access /api/events without API key
 	req := httptest.NewRequest(http.MethodPost, "/api/events", nil)
@@ -161,12 +170,15 @@ func TestNewRouter_ProtectsAPIRoutes_WithoutAPIKey(t *testing.T) {
 }
 
 func TestNewRouter_ProtectsAPIRoutes_WithWrongAPIKey(t *testing.T) {
-	producer := &MockEventProducer{}
-	engagementProducer := &MockEngagementProducer{}
-	repository := &MockMetricsRepository{}
+	eventProducer, engagementProducer, cleanupProducers := setupTestProducers(t)
+	defer cleanupProducers()
+
+	repo, cleanupRepo := setupTestRepository(t)
+	defer cleanupRepo()
+
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
-	router := NewRouter(producer, engagementProducer, repository, logger, "secret-key", nil)
+	router := NewRouter(eventProducer, engagementProducer, repo, logger, "secret-key", nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/events", nil)
 	req.Header.Set("X-API-Key", "wrong-key")
@@ -180,12 +192,15 @@ func TestNewRouter_ProtectsAPIRoutes_WithWrongAPIKey(t *testing.T) {
 }
 
 func TestNewRouter_AllowsAPIRoutes_WithCorrectAPIKey(t *testing.T) {
-	producer := &MockEventProducer{}
-	engagementProducer := &MockEngagementProducer{}
-	repository := &MockMetricsRepository{}
+	eventProducer, engagementProducer, cleanupProducers := setupTestProducers(t)
+	defer cleanupProducers()
+
+	repo, cleanupRepo := setupTestRepository(t)
+	defer cleanupRepo()
+
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
-	router := NewRouter(producer, engagementProducer, repository, logger, "secret-key", nil)
+	router := NewRouter(eventProducer, engagementProducer, repo, logger, "secret-key", nil)
 
 	// POST /api/events with correct API key (will return 400 due to missing body, but not 401)
 	req := httptest.NewRequest(http.MethodPost, "/api/events", nil)
@@ -201,12 +216,15 @@ func TestNewRouter_AllowsAPIRoutes_WithCorrectAPIKey(t *testing.T) {
 }
 
 func TestNewRouter_RegistersEngagementsEndpoint(t *testing.T) {
-	producer := &MockEventProducer{}
-	engagementProducer := &MockEngagementProducer{}
-	repository := &MockMetricsRepository{}
+	eventProducer, engagementProducer, cleanupProducers := setupTestProducers(t)
+	defer cleanupProducers()
+
+	repo, cleanupRepo := setupTestRepository(t)
+	defer cleanupRepo()
+
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
-	router := NewRouter(producer, engagementProducer, repository, logger, "secret-key", nil)
+	router := NewRouter(eventProducer, engagementProducer, repo, logger, "secret-key", nil)
 
 	// POST /api/engagements with correct API key
 	req := httptest.NewRequest(http.MethodPost, "/api/engagements", nil)
@@ -225,16 +243,15 @@ func TestNewRouter_RegistersEngagementsEndpoint(t *testing.T) {
 }
 
 func TestNewRouter_RegistersMatchMetricsEndpoint(t *testing.T) {
-	producer := &MockEventProducer{}
-	engagementProducer := &MockEngagementProducer{}
-	repository := &MockMetricsRepository{
-		GetMatchMetricsFunc: func(ctx context.Context, matchID string) (*domain.MatchMetrics, error) {
-			return nil, nil
-		},
-	}
+	eventProducer, engagementProducer, cleanupProducers := setupTestProducers(t)
+	defer cleanupProducers()
+
+	repo, cleanupRepo := setupTestRepository(t)
+	defer cleanupRepo()
+
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
-	router := NewRouter(producer, engagementProducer, repository, logger, "secret-key", nil)
+	router := NewRouter(eventProducer, engagementProducer, repo, logger, "secret-key", nil)
 
 	// GET /api/matches/{matchId}/metrics
 	req := httptest.NewRequest(http.MethodGet, "/api/matches/test-match-123/metrics", nil)
@@ -250,14 +267,17 @@ func TestNewRouter_RegistersMatchMetricsEndpoint(t *testing.T) {
 }
 
 func TestNewServer_CreatesServer(t *testing.T) {
-	producer := &MockEventProducer{}
-	engagementProducer := &MockEngagementProducer{}
-	repository := &MockMetricsRepository{}
+	eventProducer, engagementProducer, cleanupProducers := setupTestProducers(t)
+	defer cleanupProducers()
+
+	repo, cleanupRepo := setupTestRepository(t)
+	defer cleanupRepo()
+
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	apiKey := "test-api-key"
 	openAPISpec := []byte("openapi: 3.0.0")
 
-	server := NewServer(":8080", producer, engagementProducer, repository, logger, apiKey, openAPISpec)
+	server := NewServer(":8080", eventProducer, engagementProducer, repo, logger, apiKey, openAPISpec)
 
 	if server == nil {
 		t.Fatal("NewServer returned nil")
@@ -265,12 +285,15 @@ func TestNewServer_CreatesServer(t *testing.T) {
 }
 
 func TestNewServer_ConfiguresAddress(t *testing.T) {
-	producer := &MockEventProducer{}
-	engagementProducer := &MockEngagementProducer{}
-	repository := &MockMetricsRepository{}
+	eventProducer, engagementProducer, cleanupProducers := setupTestProducers(t)
+	defer cleanupProducers()
+
+	repo, cleanupRepo := setupTestRepository(t)
+	defer cleanupRepo()
+
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
-	server := NewServer(":9090", producer, engagementProducer, repository, logger, "key", nil)
+	server := NewServer(":9090", eventProducer, engagementProducer, repo, logger, "key", nil)
 
 	if server.Addr != ":9090" {
 		t.Errorf("NewServer Addr = %q, want %q", server.Addr, ":9090")
@@ -278,12 +301,15 @@ func TestNewServer_ConfiguresAddress(t *testing.T) {
 }
 
 func TestNewServer_ConfiguresTimeouts(t *testing.T) {
-	producer := &MockEventProducer{}
-	engagementProducer := &MockEngagementProducer{}
-	repository := &MockMetricsRepository{}
+	eventProducer, engagementProducer, cleanupProducers := setupTestProducers(t)
+	defer cleanupProducers()
+
+	repo, cleanupRepo := setupTestRepository(t)
+	defer cleanupRepo()
+
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
-	server := NewServer(":8080", producer, engagementProducer, repository, logger, "key", nil)
+	server := NewServer(":8080", eventProducer, engagementProducer, repo, logger, "key", nil)
 
 	if server.ReadTimeout != 15*1e9 {
 		t.Errorf("NewServer ReadTimeout = %v, want 15s", server.ReadTimeout)
@@ -297,12 +323,15 @@ func TestNewServer_ConfiguresTimeouts(t *testing.T) {
 }
 
 func TestNewServer_HasHandler(t *testing.T) {
-	producer := &MockEventProducer{}
-	engagementProducer := &MockEngagementProducer{}
-	repository := &MockMetricsRepository{}
+	eventProducer, engagementProducer, cleanupProducers := setupTestProducers(t)
+	defer cleanupProducers()
+
+	repo, cleanupRepo := setupTestRepository(t)
+	defer cleanupRepo()
+
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
-	server := NewServer(":8080", producer, engagementProducer, repository, logger, "key", nil)
+	server := NewServer(":8080", eventProducer, engagementProducer, repo, logger, "key", nil)
 
 	if server.Handler == nil {
 		t.Error("NewServer Handler should not be nil")

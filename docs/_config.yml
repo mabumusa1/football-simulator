@@ -1,7 +1,7 @@
 title: Football Infrastructure
 description: Real-time football match event streaming and viewer engagement analytics platform
 baseurl: "/football-simulator"
-url: ""
+url: "https://mabumusa1.github.io"
 
 # Build settings
 markdown: kramdown
@@ -11,10 +11,11 @@ highlighter: rouge
 header_pages:
   - index.md
   - getting-started.md
+  - contributing.md
+  - deployment.md
   - architecture.md
   - api-reference.md
-  - deployment.md
-  - development.md
+  - configuration.md
   - load-testing.md
 
 # Exclude from build

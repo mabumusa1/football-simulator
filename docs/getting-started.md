@@ -6,69 +6,50 @@ nav_order: 2
 
 # Getting Started
 
-Get Football Infrastructure running in under 5 minutes.
+Get Football Infrastructure running locally in under 5 minutes.
 
 ## Prerequisites
 
 - **Docker** (20.10+) and **Docker Compose** (v2)
 - **Git**
-- **VS Code** with [Dev Containers extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers) (recommended)
+- **VS Code** with [Dev Containers extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers)
 
-## Quick Start (Dev Container)
+## Quick Start
 
-The fastest way to get started is using VS Code Dev Containers:
+### 1. Clone the Repository
 
 ```bash
-# 1. Clone the repository
 git clone https://github.com/mabumusa1/football-infrastructure.git
 cd football-infrastructure
-
-# 2. Open in VS Code
-code .
-
-# 3. When prompted, click "Reopen in Container"
-#    Or use Command Palette: "Dev Containers: Reopen in Container"
 ```
+
+### 2. Open in VS Code
+
+```bash
+code .
+```
+
+### 3. Start Dev Container
+
+When VS Code opens, you'll see a prompt: **"Reopen in Container"** - click it.
+
+Or use Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`):
+- Type: `Dev Containers: Reopen in Container`
 
 The dev container will automatically:
-- Build the development environment
-- Start Kafka, ClickHouse, Prometheus, and Grafana
-- Install Go tools and dependencies
+- Build the development environment with Go 1.21
+- Start all infrastructure services (Kafka, ClickHouse, Prometheus, Grafana)
+- Install Go tools (gopls, golangci-lint, dlv)
 - Configure all environment variables
+- Forward all necessary ports
 
-## Quick Start (Manual)
+**First build takes 2-3 minutes.** Subsequent opens are faster.
 
-If you prefer not to use Dev Containers:
-
-```bash
-# 1. Clone the repository
-git clone https://github.com/mabumusa1/football-infrastructure.git
-cd football-infrastructure
-
-# 2. Copy environment file
-cp .env.example .env
-
-# 3. Start infrastructure services
-cd infra/compose/dev
-docker compose -f base.yml -f kafka.yml -f clickhouse.yml -f monitoring.yml up -d
-
-# 4. Wait for services to be healthy (about 30 seconds)
-docker compose ps
-
-# 5. Build and run the API
-cd ../../../apps/api
-go build -o api .
-./api
-
-# 6. In another terminal, run the consumer
-cd apps/consumer
-go build -o consumer .
-./consumer
-```
+---
 
 ## Verify Installation
 
-Once running, verify all services are healthy:
+Once the container is running, verify all services are healthy:
 
 ```bash
 # API health check
@@ -88,6 +69,8 @@ curl http://localhost:9090/-/healthy
 # Expected: Prometheus Server is Healthy.
 ```
 
+---
+
 ## Access Services
 
 | Service | URL | Credentials |
@@ -99,18 +82,18 @@ curl http://localhost:9090/-/healthy
 | Prometheus | http://localhost:9090 | - |
 | Grafana | http://localhost:3005 | admin / admin |
 
+---
+
 ## Send Your First Event
 
-```bash
-# Set API key (from .env file)
-export API_KEY="your-api-key"
+### Match Event
 
-# Send a match event
+```bash
 curl -X POST http://localhost:8080/api/events \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: $API_KEY" \
+  -H "X-API-Key: dev-api-key" \
   -d '{
-    "eventId": "'"$(uuidgen)"'",
+    "eventId": "'"$(uuidgen || cat /proc/sys/kernel/random/uuid)"'",
     "matchId": "match-001",
     "eventType": "goal",
     "timestamp": "'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'",
@@ -119,7 +102,7 @@ curl -X POST http://localhost:8080/api/events \
   }'
 ```
 
-Expected response:
+**Expected response:**
 ```json
 {
   "eventId": "550e8400-e29b-41d4-a716-446655440000",
@@ -128,15 +111,15 @@ Expected response:
 }
 ```
 
-## Send Engagement Events
+### Engagement Event
 
 ```bash
 curl -X POST http://localhost:8080/api/engagements \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: $API_KEY" \
+  -H "X-API-Key: dev-api-key" \
   -d '{
     "events": [{
-      "event_id": "'"$(uuidgen)"'",
+      "event_id": "'"$(uuidgen || cat /proc/sys/kernel/random/uuid)"'",
       "match_id": "match-001",
       "user_id": "user-123",
       "session_id": "session-456",
@@ -149,36 +132,58 @@ curl -X POST http://localhost:8080/api/engagements \
   }'
 ```
 
-## Run a Load Test
+---
 
-Test the system with simulated traffic:
+## Project Structure
 
-```bash
-cd tests/load
-
-# Set up Python environment
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-
-# Run a quick test (1,000 viewers, 5 minutes)
-python match_simulator.py \
-  --api-url http://localhost:8080 \
-  --api-key "$API_KEY" \
-  --viewers 1000 \
-  --duration 5
+```
+football-infrastructure/
+├── .devcontainer/           # Dev container configuration
+├── .github/workflows/       # CI/CD pipelines
+├── .vscode/                 # VS Code settings, debug configs
+├── apps/
+│   ├── api/                 # Go REST API service
+│   └── consumer/            # Go Kafka consumer service
+├── infra/
+│   ├── aws/                 # CloudFormation templates
+│   ├── compose/             # Docker Compose files
+│   ├── clickhouse/          # Database schema
+│   ├── prometheus/          # Monitoring config
+│   └── grafana/             # Dashboards
+├── scripts/                 # Deployment scripts
+├── tests/load/              # Load testing tools
+└── docs/                    # Documentation
 ```
 
-## View Metrics in Grafana
+---
 
-1. Open http://localhost:3005
-2. Login with `admin` / `admin`
-3. Navigate to Dashboards → k6 Load Test
-4. Watch real-time metrics during load tests
+## Running Services
+
+The API and Consumer services start automatically in the dev container.
+
+### Manual Start (if needed)
+
+```bash
+# Terminal 1 - API
+cd apps/api && go run .
+
+# Terminal 2 - Consumer
+cd apps/consumer && go run .
+```
+
+### VS Code Tasks
+
+Use pre-configured tasks via Command Palette (`Ctrl+Shift+P`):
+- `Tasks: Run Task` → `Start API Server`
+- `Tasks: Run Task` → `Start Consumer`
+- `Tasks: Run Task` → `Start All Services`
+
+---
 
 ## Common Issues
 
 ### Services won't start
+
 ```bash
 # Check Docker is running
 docker info
@@ -190,6 +195,7 @@ lsof -i :9000  # ClickHouse
 ```
 
 ### API returns 503 (Service Unavailable)
+
 ```bash
 # Check if Kafka and ClickHouse are healthy
 docker compose ps
@@ -199,16 +205,30 @@ docker compose logs kafka
 docker compose logs clickhouse
 ```
 
+### Dev Container won't build
+
+```bash
+# Rebuild container
+# Command Palette → "Dev Containers: Rebuild Container"
+
+# If that fails, reset Docker
+docker system prune -a
+```
+
 ### Permission denied errors
+
 ```bash
 # Ensure you're in the docker group
 sudo usermod -aG docker $USER
 # Log out and back in
 ```
 
+---
+
 ## Next Steps
 
 - [API Reference](api-reference.md) - Learn all available endpoints
+- [Contributing](contributing.md) - PR workflow and CI/CD
 - [Architecture](architecture.md) - Understand the system design
-- [Development Setup](development.md) - Configure your IDE
-- [Deployment Guide](deployment.md) - Deploy to production
+- [Deployment Guide](deployment.md) - Deploy to AWS
+- [Load Testing](load-testing.md) - Simulate 100K viewers

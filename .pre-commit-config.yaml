@@ -1,0 +1,49 @@
+repos:
+  - repo: https://github.com/golangci/golangci-lint
+    rev: v2.6.0
+    hooks:
+      - id: golangci-lint
+        name: golangci-lint (api)
+        entry: bash -c 'cd apps/api && golangci-lint run --fix'
+        files: ^apps/api/
+        types: [go]
+        pass_filenames: false
+
+      - id: golangci-lint
+        name: golangci-lint (consumer)
+        entry: bash -c 'cd apps/consumer && golangci-lint run --fix'
+        files: ^apps/consumer/
+        types: [go]
+        pass_filenames: false
+
+  - repo: local
+    hooks:
+      - id: go-fmt
+        name: go fmt (api)
+        entry: bash -c 'cd apps/api && go fmt ./...'
+        files: ^apps/api/
+        types: [go]
+        language: system
+        pass_filenames: false
+
+      - id: go-fmt
+        name: go fmt (consumer)
+        entry: bash -c 'cd apps/consumer && go fmt ./...'
+        files: ^apps/consumer/
+        types: [go]
+        language: system
+        pass_filenames: false
+
+      - id: go-mod-tidy
+        name: go mod tidy (api)
+        entry: bash -c 'cd apps/api && go mod tidy'
+        files: ^apps/api/go\.(mod|sum)$
+        language: system
+        pass_filenames: false
+
+      - id: go-mod-tidy
+        name: go mod tidy (consumer)
+        entry: bash -c 'cd apps/consumer && go mod tidy'
+        files: ^apps/consumer/go\.(mod|sum)$
+        language: system
+        pass_filenames: false

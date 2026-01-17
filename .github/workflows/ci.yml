@@ -54,12 +54,14 @@ jobs:
         uses: devcontainers/ci@v0.3
         with:
           runCmd: |
+            set -e
+
             echo "=== Running health check to initialize services ==="
             bash /workspace/.devcontainer/health-check.sh
 
             echo ""
             echo "=== Building API ==="
-            go build -o /tmp/api .
+            cd /workspace/apps/api && go build -o /tmp/api .
 
             echo ""
             echo "=== Building Consumer ==="
@@ -67,12 +69,10 @@ jobs:
 
             echo ""
             echo "=== Running API tests with coverage ==="
-            cd /workspace/apps/api && go test -v -coverprofile=/workspace/coverage-api.out -json ./... > /workspace/test-api.json 2>&1 || true
             cd /workspace/apps/api && go test -v -coverprofile=/workspace/coverage-api.out ./...
 
             echo ""
             echo "=== Running Consumer tests with coverage ==="
-            cd /workspace/apps/consumer && go test -v -coverprofile=/workspace/coverage-consumer.out -json ./... > /workspace/test-consumer.json 2>&1 || true
             cd /workspace/apps/consumer && go test -v -coverprofile=/workspace/coverage-consumer.out ./...
 
             echo ""
@@ -91,24 +91,6 @@ jobs:
         with:
           name: coverage-report
           path: coverage.out
-
-      - name: Add PR comment with results
-        if: github.event_name == 'pull_request'
-        uses: marocchino/sticky-pull-request-comment@v2
-        with:
-          header: test-results
-          message: |
-            ## 🧪 Test Results
-
-            | App | Status |
-            |-----|--------|
-            | API | ✅ Passed |
-            | Consumer | ✅ Passed |
-
-            **Coverage:** See SonarCloud for detailed coverage report.
-
-            ---
-            *Commit: ${{ github.sha }}*
 
   sonarcloud:
     runs-on: ubuntu-latest

@@ -19,15 +19,15 @@ Football Infrastructure ingests game events (goals, passes, fouls, etc.) and cor
 - **Scalable Architecture**: Horizontal scaling via Docker Swarm
 - **Production Ready**: SSL/TLS, monitoring, CI/CD included
 
-## Architecture at a Glance
+## Architecture
 
 ```
 ┌─────────────┐     ┌─────────┐     ┌──────────────┐     ┌────────────┐
 │   Clients   │────▶│   API   │────▶│    Kafka     │────▶│  Consumer  │
 │  (100K+)    │     │  (Go)   │     │   (KRaft)    │     │   (Go)     │
 └─────────────┘     └─────────┘     └──────────────┘     └────────────┘
-                                                                │
-                                                                ▼
+                                                               │
+                                                               ▼
 ┌─────────────┐     ┌─────────┐     ┌──────────────┐     ┌────────────┐
 │   Grafana   │◀────│Prometheus│◀───│   Metrics    │     │ ClickHouse │
 │             │     │         │     │              │     │   (OLAP)   │
@@ -47,33 +47,55 @@ Football Infrastructure ingests game events (goals, passes, fouls, etc.) and cor
 | CI/CD | GitHub Actions |
 | Cloud | AWS (CloudFormation) |
 
-## Quick Links
+---
 
-- [Getting Started](getting-started.md) - Get up and running in minutes
-- [API Reference](api-reference.md) - Complete API documentation
-- [Deployment Guide](deployment.md) - Deploy to production
-- [Development Setup](development.md) - Set up your dev environment
+## Documentation
 
-## For Developers
+### For Developers
 
-If you want to **run this code locally**:
+Start here if you want to **run this code locally** or **contribute**:
+
+1. **[Getting Started](getting-started.md)** - Clone, dev container setup, run locally
+2. **[Contributing](contributing.md)** - PR workflow, CI/CD, code quality
+3. **[Architecture](architecture.md)** - System design and data flows
+
+### For Operators
+
+Start here if you want to **deploy to production**:
+
+1. **[Deployment Guide](deployment.md)** - AWS CloudFormation, Docker Swarm, CI/CD
+2. **[Configuration](configuration.md)** - Environment variables reference
+3. **[Load Testing](load-testing.md)** - Simulate 100K viewers
+
+### For API Users
+
+Start here if you want to **send data to this service**:
+
+1. **[API Reference](api-reference.md)** - Complete endpoint documentation with examples
+
+---
+
+## Quick Start
 
 ```bash
-# Clone and open in VS Code with Dev Containers
+# Clone the repository
 git clone https://github.com/mabumusa1/football-infrastructure.git
 cd football-infrastructure
+
+# Open in VS Code and start Dev Container
 code .
 # Click "Reopen in Container" when prompted
 ```
 
-See [Development Setup](development.md) for detailed instructions.
+See [Getting Started](getting-started.md) for detailed instructions.
 
-## For API Users
+---
 
-If you want to **send traffic to this service**:
+## Send Events
+
+### Match Event
 
 ```bash
-# Send a match event
 curl -X POST https://api.your-domain.com/api/events \
   -H "Content-Type: application/json" \
   -H "X-API-Key: your-api-key" \
@@ -86,7 +108,30 @@ curl -X POST https://api.your-domain.com/api/events \
   }'
 ```
 
+### Engagement Event
+
+```bash
+curl -X POST https://api.your-domain.com/api/engagements \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-api-key" \
+  -d '{
+    "events": [{
+      "event_id": "550e8400-e29b-41d4-a716-446655440001",
+      "match_id": "match-2024-001",
+      "user_id": "user-456",
+      "session_id": "session-789",
+      "engagement_type": "reaction",
+      "engagement_subtype": "emoji_goal",
+      "game_minute": 45,
+      "device_type": "mobile",
+      "timestamp": "2024-01-15T14:30:01Z"
+    }]
+  }'
+```
+
 See [API Reference](api-reference.md) for complete endpoint documentation.
+
+---
 
 ## Repository Structure
 
@@ -105,6 +150,8 @@ football-infrastructure/
 ├── tests/load/       # Load testing tools
 └── docs/             # This documentation
 ```
+
+---
 
 ## License
 

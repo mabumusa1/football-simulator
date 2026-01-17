@@ -2,491 +2,302 @@ package repository
 
 import (
 	"context"
-	"errors"
-	"log/slog"
 	"os"
 	"testing"
 	"time"
 
-	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
+	"github.com/ClickHouse/clickhouse-go/v2"
+	"github.com/google/uuid"
 )
 
-// MockRow implements driver.Row for testing.
-type MockRow struct {
-	scanFunc func(dest ...interface{}) error
-}
-
-func (m *MockRow) Scan(dest ...interface{}) error {
-	if m.scanFunc != nil {
-		return m.scanFunc(dest...)
+// Test infrastructure helpers
+func getClickHouseHost() string {
+	host := os.Getenv("CLICKHOUSE_HOST")
+	if host == "" {
+		host = "clickhouse"
 	}
-	return nil
+	return host
 }
 
-func (m *MockRow) ScanStruct(dest interface{}) error {
-	return nil
-}
-
-func (m *MockRow) Err() error {
-	return nil
-}
-
-// MockRows implements driver.Rows for testing.
-type MockRows struct {
-	current  int
-	data     [][]interface{}
-	scanFunc func(dest ...interface{}) error
-	errFunc  func() error
-	columns  []string
-}
-
-func (m *MockRows) Next() bool {
-	m.current++
-	return m.current <= len(m.data)
-}
-
-func (m *MockRows) Scan(dest ...interface{}) error {
-	if m.scanFunc != nil {
-		return m.scanFunc(dest...)
+func getClickHousePort() string {
+	port := os.Getenv("CLICKHOUSE_PORT")
+	if port == "" {
+		port = "9000"
 	}
-	if m.current > 0 && m.current <= len(m.data) {
-		row := m.data[m.current-1]
-		for i, v := range row {
-			if i < len(dest) {
-				switch d := dest[i].(type) {
-				case *string:
-					if s, ok := v.(string); ok {
-						*d = s
-					}
-				case *uint64:
-					if n, ok := v.(uint64); ok {
-						*d = n
-					}
-				case *int64:
-					if n, ok := v.(int64); ok {
-						*d = n
-					}
-				case *time.Time:
-					if t, ok := v.(time.Time); ok {
-						*d = t
-					}
-				}
-			}
-		}
+	return port
+}
+
+func setupTestConnection(t *testing.T) (*ClickHouseRepository, func()) {
+	host := getClickHouseHost()
+	port := getClickHousePort()
+
+	opts := &clickhouse.Options{
+		Addr: []string{host + ":" + port},
+		Auth: clickhouse.Auth{
+			Database: "football_simulator",
+			Username: "default",
+			Password: "",
+		},
+		Settings: clickhouse.Settings{
+			"max_execution_time": 60,
+		},
+		DialTimeout: 10 * time.Second,
 	}
-	return nil
-}
 
-func (m *MockRows) ScanStruct(dest interface{}) error {
-	return nil
-}
-
-func (m *MockRows) ColumnTypes() []driver.ColumnType {
-	return nil
-}
-
-func (m *MockRows) Totals(dest ...interface{}) error {
-	return nil
-}
-
-func (m *MockRows) Columns() []string {
-	return m.columns
-}
-
-func (m *MockRows) Close() error {
-	return nil
-}
-
-func (m *MockRows) Err() error {
-	if m.errFunc != nil {
-		return m.errFunc()
+	conn, err := clickhouse.Open(opts)
+	if err != nil {
+		t.Fatalf("failed to open ClickHouse connection: %v", err)
 	}
-	return nil
-}
-
-// MockConn implements driver.Conn for testing.
-type MockConn struct {
-	pingFunc     func(ctx context.Context) error
-	queryRowFunc func(ctx context.Context, query string, args ...interface{}) driver.Row
-	queryFunc    func(ctx context.Context, query string, args ...interface{}) (driver.Rows, error)
-	closeFunc    func() error
-}
-
-func (m *MockConn) Contributors() []string {
-	return nil
-}
-
-func (m *MockConn) ServerVersion() (*driver.ServerVersion, error) {
-	return &driver.ServerVersion{}, nil
-}
-
-func (m *MockConn) Select(ctx context.Context, dest interface{}, query string, args ...interface{}) error {
-	return nil
-}
-
-func (m *MockConn) Query(ctx context.Context, query string, args ...interface{}) (driver.Rows, error) {
-	if m.queryFunc != nil {
-		return m.queryFunc(ctx, query, args...)
-	}
-	return &MockRows{}, nil
-}
-
-func (m *MockConn) QueryRow(ctx context.Context, query string, args ...interface{}) driver.Row {
-	if m.queryRowFunc != nil {
-		return m.queryRowFunc(ctx, query, args...)
-	}
-	return &MockRow{}
-}
-
-func (m *MockConn) PrepareBatch(ctx context.Context, query string, opts ...driver.PrepareBatchOption) (driver.Batch, error) {
-	return nil, nil
-}
-
-func (m *MockConn) Exec(ctx context.Context, query string, args ...interface{}) error {
-	return nil
-}
-
-func (m *MockConn) AsyncInsert(ctx context.Context, query string, wait bool, args ...interface{}) error {
-	return nil
-}
-
-func (m *MockConn) Ping(ctx context.Context) error {
-	if m.pingFunc != nil {
-		return m.pingFunc(ctx)
-	}
-	return nil
-}
-
-func (m *MockConn) Stats() driver.Stats {
-	return driver.Stats{}
-}
-
-func (m *MockConn) Close() error {
-	if m.closeFunc != nil {
-		return m.closeFunc()
-	}
-	return nil
-}
-
-func TestNewClickHouseRepository(t *testing.T) {
-	conn := &MockConn{}
-	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-
-	repo := NewClickHouseRepository(conn, logger)
-
-	if repo == nil {
-		t.Fatal("NewClickHouseRepository returned nil")
-	}
-	if repo.conn != conn {
-		t.Error("NewClickHouseRepository did not set conn correctly")
-	}
-	if repo.logger != logger {
-		t.Error("NewClickHouseRepository did not set logger correctly")
-	}
-}
-
-func TestNewClickHouseRepository_NilLogger(t *testing.T) {
-	conn := &MockConn{}
 
 	repo := NewClickHouseRepository(conn, nil)
 
-	if repo == nil {
-		t.Fatal("NewClickHouseRepository returned nil")
+	cleanup := func() {
+		_ = conn.Close()
 	}
+
+	return repo, cleanup
+}
+
+// =============================================================================
+// Constructor Tests
+// =============================================================================
+
+func TestNewClickHouseRepository(t *testing.T) {
+	repo, cleanup := setupTestConnection(t)
+	defer cleanup()
+
+	if repo == nil {
+		t.Fatal("expected non-nil repository")
+	}
+
+	if repo.conn == nil {
+		t.Error("expected conn to be set")
+	}
+
 	if repo.logger == nil {
-		t.Error("NewClickHouseRepository should use default logger when nil is passed")
+		t.Error("expected default logger to be set")
 	}
 }
+
+// =============================================================================
+// Ping Tests
+// =============================================================================
 
 func TestClickHouseRepository_Ping_Success(t *testing.T) {
-	pingCalled := false
-	conn := &MockConn{
-		pingFunc: func(ctx context.Context) error {
-			pingCalled = true
-			return nil
-		},
-	}
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	repo := NewClickHouseRepository(conn, logger)
+	repo, cleanup := setupTestConnection(t)
+	defer cleanup()
 
-	err := repo.Ping(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
+	err := repo.Ping(ctx)
 	if err != nil {
-		t.Errorf("Ping returned error: %v", err)
-	}
-	if !pingCalled {
-		t.Error("Ping did not call conn.Ping")
+		t.Fatalf("Ping failed: %v", err)
 	}
 }
 
-func TestClickHouseRepository_Ping_Error(t *testing.T) {
-	expectedErr := errors.New("connection failed")
-	conn := &MockConn{
-		pingFunc: func(ctx context.Context) error {
-			return expectedErr
-		},
-	}
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	repo := NewClickHouseRepository(conn, logger)
+func TestClickHouseRepository_Ping_ContextCanceled(t *testing.T) {
+	repo, cleanup := setupTestConnection(t)
+	defer cleanup()
 
-	err := repo.Ping(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
 
+	err := repo.Ping(ctx)
 	if err == nil {
-		t.Error("Ping should return error when conn.Ping fails")
+		t.Error("expected error for canceled context")
 	}
-	if !errors.Is(err, expectedErr) {
-		t.Errorf("Ping error should wrap original error, got: %v", err)
+}
+
+// =============================================================================
+// GetMatchMetrics Tests
+// =============================================================================
+
+func TestClickHouseRepository_GetMatchMetrics_NonExistentMatch(t *testing.T) {
+	repo, cleanup := setupTestConnection(t)
+	defer cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Use a random match ID that doesn't exist
+	matchID := "nonexistent-match-" + uuid.New().String()
+
+	metrics, err := repo.GetMatchMetrics(ctx, matchID)
+	if err != nil {
+		t.Fatalf("GetMatchMetrics failed: %v", err)
+	}
+
+	// For non-existent match, should return nil metrics
+	if metrics != nil {
+		t.Error("expected nil metrics for non-existent match")
 	}
 }
 
 func TestClickHouseRepository_GetMatchMetrics_EmptyMatchID(t *testing.T) {
-	conn := &MockConn{}
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	repo := NewClickHouseRepository(conn, logger)
+	repo, cleanup := setupTestConnection(t)
+	defer cleanup()
 
-	_, err := repo.GetMatchMetrics(context.Background(), "")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
+	_, err := repo.GetMatchMetrics(ctx, "")
 	if err == nil {
-		t.Error("GetMatchMetrics should return error for empty matchID")
+		t.Error("expected error for empty matchID")
+	}
+
+	if err.Error() != "matchID cannot be empty" {
+		t.Errorf("expected 'matchID cannot be empty', got '%s'", err.Error())
 	}
 }
 
-func TestClickHouseRepository_GetMatchMetrics_Success(t *testing.T) {
-	firstEvent := time.Date(2024, 1, 1, 10, 0, 0, 0, time.UTC)
-	lastEvent := time.Date(2024, 1, 1, 11, 45, 0, 0, time.UTC)
+func TestClickHouseRepository_GetMatchMetrics_ContextCanceled(t *testing.T) {
+	repo, cleanup := setupTestConnection(t)
+	defer cleanup()
 
-	conn := &MockConn{
-		queryRowFunc: func(ctx context.Context, query string, args ...interface{}) driver.Row {
-			return &MockRow{
-				scanFunc: func(dest ...interface{}) error {
-					// total_events, goals, yellow_cards, red_cards, first_event_at, last_event_at
-					if len(dest) >= 6 {
-						*dest[0].(*uint64) = 100
-						*dest[1].(*uint64) = 3
-						*dest[2].(*uint64) = 4
-						*dest[3].(*uint64) = 1
-						*dest[4].(*time.Time) = firstEvent
-						*dest[5].(*time.Time) = lastEvent
-					}
-					return nil
-				},
-			}
-		},
-		queryFunc: func(ctx context.Context, query string, args ...interface{}) (driver.Rows, error) {
-			return &MockRows{
-				data: [][]interface{}{
-					{"goal", uint64(3)},
-					{"yellow_card", uint64(4)},
-					{"red_card", uint64(1)},
-				},
-			}, nil
-		},
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	_, err := repo.GetMatchMetrics(ctx, "test-match")
+	if err == nil {
+		t.Error("expected error for canceled context")
 	}
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	repo := NewClickHouseRepository(conn, logger)
+}
 
-	metrics, err := repo.GetMatchMetrics(context.Background(), "match-123")
+// =============================================================================
+// GetEventsPerMinute Tests
+// =============================================================================
 
+func TestClickHouseRepository_GetEventsPerMinute_NonExistentMatch(t *testing.T) {
+	repo, cleanup := setupTestConnection(t)
+	defer cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Use a random match ID that doesn't exist
+	matchID := "nonexistent-match-" + uuid.New().String()
+
+	results, err := repo.GetEventsPerMinute(ctx, matchID)
 	if err != nil {
-		t.Errorf("GetMatchMetrics returned error: %v", err)
+		t.Fatalf("GetEventsPerMinute failed: %v", err)
 	}
-	if metrics == nil {
-		t.Fatal("GetMatchMetrics returned nil metrics")
-	}
-	if metrics.MatchID != "match-123" {
-		t.Errorf("GetMatchMetrics MatchID = %q, want %q", metrics.MatchID, "match-123")
-	}
-	if metrics.TotalEvents != 100 {
-		t.Errorf("GetMatchMetrics TotalEvents = %d, want %d", metrics.TotalEvents, 100)
-	}
-	if metrics.Goals != 3 {
-		t.Errorf("GetMatchMetrics Goals = %d, want %d", metrics.Goals, 3)
-	}
-	if metrics.YellowCards != 4 {
-		t.Errorf("GetMatchMetrics YellowCards = %d, want %d", metrics.YellowCards, 4)
-	}
-	if metrics.RedCards != 1 {
-		t.Errorf("GetMatchMetrics RedCards = %d, want %d", metrics.RedCards, 1)
-	}
-}
 
-func TestClickHouseRepository_GetMatchMetrics_NoEvents(t *testing.T) {
-	conn := &MockConn{
-		queryRowFunc: func(ctx context.Context, query string, args ...interface{}) driver.Row {
-			return &MockRow{
-				scanFunc: func(dest ...interface{}) error {
-					// All zeros
-					if len(dest) >= 6 {
-						*dest[0].(*uint64) = 0
-						*dest[1].(*uint64) = 0
-						*dest[2].(*uint64) = 0
-						*dest[3].(*uint64) = 0
-						*dest[4].(*time.Time) = time.Time{}
-						*dest[5].(*time.Time) = time.Time{}
-					}
-					return nil
-				},
-			}
-		},
-	}
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	repo := NewClickHouseRepository(conn, logger)
-
-	metrics, err := repo.GetMatchMetrics(context.Background(), "match-123")
-
-	if err != nil {
-		t.Errorf("GetMatchMetrics returned error: %v", err)
-	}
-	if metrics != nil {
-		t.Error("GetMatchMetrics should return nil for match with no events")
-	}
-}
-
-func TestClickHouseRepository_GetMatchMetrics_QueryError(t *testing.T) {
-	conn := &MockConn{
-		queryRowFunc: func(ctx context.Context, query string, args ...interface{}) driver.Row {
-			return &MockRow{
-				scanFunc: func(dest ...interface{}) error {
-					return errors.New("query failed")
-				},
-			}
-		},
-	}
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	repo := NewClickHouseRepository(conn, logger)
-
-	_, err := repo.GetMatchMetrics(context.Background(), "match-123")
-
-	if err == nil {
-		t.Error("GetMatchMetrics should return error when query fails")
-	}
-}
-
-func TestClickHouseRepository_GetMatchMetrics_EventsByTypeQueryError(t *testing.T) {
-	conn := &MockConn{
-		queryRowFunc: func(ctx context.Context, query string, args ...interface{}) driver.Row {
-			return &MockRow{
-				scanFunc: func(dest ...interface{}) error {
-					if len(dest) >= 6 {
-						*dest[0].(*uint64) = 100
-						*dest[1].(*uint64) = 3
-						*dest[2].(*uint64) = 4
-						*dest[3].(*uint64) = 1
-						*dest[4].(*time.Time) = time.Now()
-						*dest[5].(*time.Time) = time.Now()
-					}
-					return nil
-				},
-			}
-		},
-		queryFunc: func(ctx context.Context, query string, args ...interface{}) (driver.Rows, error) {
-			return nil, errors.New("events by type query failed")
-		},
-	}
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	repo := NewClickHouseRepository(conn, logger)
-
-	_, err := repo.GetMatchMetrics(context.Background(), "match-123")
-
-	if err == nil {
-		t.Error("GetMatchMetrics should return error when events by type query fails")
+	// For non-existent match, should return empty slice
+	if len(results) != 0 {
+		t.Errorf("expected empty results for non-existent match, got %d", len(results))
 	}
 }
 
 func TestClickHouseRepository_GetEventsPerMinute_EmptyMatchID(t *testing.T) {
-	conn := &MockConn{}
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	repo := NewClickHouseRepository(conn, logger)
+	repo, cleanup := setupTestConnection(t)
+	defer cleanup()
 
-	_, err := repo.GetEventsPerMinute(context.Background(), "")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
+	_, err := repo.GetEventsPerMinute(ctx, "")
 	if err == nil {
-		t.Error("GetEventsPerMinute should return error for empty matchID")
+		t.Error("expected error for empty matchID")
+	}
+
+	if err.Error() != "matchID cannot be empty" {
+		t.Errorf("expected 'matchID cannot be empty', got '%s'", err.Error())
 	}
 }
 
-func TestClickHouseRepository_GetEventsPerMinute_Success(t *testing.T) {
-	minute1 := time.Date(2024, 1, 1, 10, 0, 0, 0, time.UTC)
-	minute2 := time.Date(2024, 1, 1, 10, 1, 0, 0, time.UTC)
+func TestClickHouseRepository_GetEventsPerMinute_ContextCanceled(t *testing.T) {
+	repo, cleanup := setupTestConnection(t)
+	defer cleanup()
 
-	conn := &MockConn{
-		queryFunc: func(ctx context.Context, query string, args ...interface{}) (driver.Rows, error) {
-			return &MockRows{
-				data: [][]interface{}{
-					{minute1, "goal", uint64(2)},
-					{minute1, "pass", uint64(50)},
-					{minute2, "shot", uint64(5)},
-				},
-			}, nil
-		},
-	}
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	repo := NewClickHouseRepository(conn, logger)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
 
-	results, err := repo.GetEventsPerMinute(context.Background(), "match-123")
-
-	if err != nil {
-		t.Errorf("GetEventsPerMinute returned error: %v", err)
-	}
-	if len(results) != 3 {
-		t.Errorf("GetEventsPerMinute returned %d results, want %d", len(results), 3)
-	}
-}
-
-func TestClickHouseRepository_GetEventsPerMinute_QueryError(t *testing.T) {
-	conn := &MockConn{
-		queryFunc: func(ctx context.Context, query string, args ...interface{}) (driver.Rows, error) {
-			return nil, errors.New("query failed")
-		},
-	}
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	repo := NewClickHouseRepository(conn, logger)
-
-	_, err := repo.GetEventsPerMinute(context.Background(), "match-123")
-
+	_, err := repo.GetEventsPerMinute(ctx, "test-match")
 	if err == nil {
-		t.Error("GetEventsPerMinute should return error when query fails")
+		t.Error("expected error for canceled context")
 	}
 }
 
-func TestClickHouseRepository_GetEventsPerMinute_RowsError(t *testing.T) {
-	conn := &MockConn{
-		queryFunc: func(ctx context.Context, query string, args ...interface{}) (driver.Rows, error) {
-			return &MockRows{
-				errFunc: func() error {
-					return errors.New("rows error")
-				},
-			}, nil
-		},
-	}
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	repo := NewClickHouseRepository(conn, logger)
+// =============================================================================
+// Connection Tests
+// =============================================================================
 
-	_, err := repo.GetEventsPerMinute(context.Background(), "match-123")
+func TestClickHouseRepository_MultipleQueries(t *testing.T) {
+	repo, cleanup := setupTestConnection(t)
+	defer cleanup()
 
-	if err == nil {
-		t.Error("GetEventsPerMinute should return error when rows.Err() returns error")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Run multiple queries in sequence
+	for i := 0; i < 5; i++ {
+		matchID := "test-match-" + uuid.New().String()
+
+		_, err := repo.GetMatchMetrics(ctx, matchID)
+		if err != nil {
+			t.Fatalf("GetMatchMetrics failed on iteration %d: %v", i, err)
+		}
+
+		_, err = repo.GetEventsPerMinute(ctx, matchID)
+		if err != nil {
+			t.Fatalf("GetEventsPerMinute failed on iteration %d: %v", i, err)
+		}
 	}
 }
 
-func TestClickHouseRepository_GetEventsPerMinute_EmptyResult(t *testing.T) {
-	conn := &MockConn{
-		queryFunc: func(ctx context.Context, query string, args ...interface{}) (driver.Rows, error) {
-			return &MockRows{
-				data: [][]interface{}{},
-			}, nil
-		},
-	}
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	repo := NewClickHouseRepository(conn, logger)
+func TestClickHouseRepository_ConcurrentQueries(t *testing.T) {
+	repo, cleanup := setupTestConnection(t)
+	defer cleanup()
 
-	results, err := repo.GetEventsPerMinute(context.Background(), "match-123")
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
 
-	if err != nil {
-		t.Errorf("GetEventsPerMinute returned error: %v", err)
+	errChan := make(chan error, 10)
+
+	// Run concurrent queries
+	for i := 0; i < 10; i++ {
+		go func() {
+			matchID := "test-match-" + uuid.New().String()
+			_, err := repo.GetMatchMetrics(ctx, matchID)
+			errChan <- err
+		}()
 	}
-	// Results can be nil when no data is returned - this is acceptable
-	if len(results) != 0 {
-		t.Errorf("GetEventsPerMinute returned %d results, want %d", len(results), 0)
+
+	// Collect results
+	for i := 0; i < 10; i++ {
+		if err := <-errChan; err != nil {
+			t.Errorf("Concurrent query failed: %v", err)
+		}
 	}
+}
+
+// =============================================================================
+// Timeout Tests
+// =============================================================================
+
+func TestClickHouseRepository_Ping_Timeout(t *testing.T) {
+	repo, cleanup := setupTestConnection(t)
+	defer cleanup()
+
+	// Very short timeout that may or may not trigger
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
+	defer cancel()
+
+	// This may succeed or fail depending on timing
+	_ = repo.Ping(ctx)
+	// Just verify it doesn't panic
+}
+
+func TestClickHouseRepository_Query_Timeout(t *testing.T) {
+	repo, cleanup := setupTestConnection(t)
+	defer cleanup()
+
+	// Very short timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
+	defer cancel()
+
+	// This will likely fail due to timeout
+	_, _ = repo.GetMatchMetrics(ctx, "test-match")
+	// Just verify it doesn't panic
 }

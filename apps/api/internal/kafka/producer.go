@@ -253,14 +253,15 @@ func (p *EventProducer) Ping(ctx context.Context) error {
 // The writer uses hash-based partitioning by key (matchId) to ensure ordering.
 func NewWriter(brokers []string, topic string) *kafka.Writer {
 	return &kafka.Writer{
-		Addr:         kafka.TCP(brokers...),
-		Topic:        topic,
-		Balancer:     &kafka.Hash{}, // Hash by key (matchId) for partition ordering
-		BatchSize:    100,
-		BatchTimeout: 10 * time.Millisecond,
-		WriteTimeout: 10 * time.Second,
-		RequiredAcks: kafka.RequireAll, // Wait for all replicas for durability
-		Async:        false,            // Synchronous writes for reliability
+		Addr:                   kafka.TCP(brokers...),
+		Topic:                  topic,
+		Balancer:               &kafka.Hash{}, // Hash by key (matchId) for partition ordering
+		AllowAutoTopicCreation: true,
+		BatchSize:              100,
+		BatchTimeout:           10 * time.Millisecond,
+		WriteTimeout:           10 * time.Second,
+		RequiredAcks:           kafka.RequireAll, // Wait for all replicas for durability
+		Async:                  false,            // Synchronous writes for reliability
 	}
 }
 
@@ -278,14 +279,15 @@ type WriterConfig struct {
 // NewWriterWithConfig creates a new Kafka writer with custom configuration.
 func NewWriterWithConfig(cfg WriterConfig) *kafka.Writer {
 	w := &kafka.Writer{
-		Addr:         kafka.TCP(cfg.Brokers...),
-		Topic:        cfg.Topic,
-		Balancer:     &kafka.Hash{},
-		BatchSize:    cfg.BatchSize,
-		BatchTimeout: cfg.BatchTimeout,
-		WriteTimeout: cfg.WriteTimeout,
-		RequiredAcks: kafka.RequireAll,
-		Async:        cfg.Async,
+		Addr:                   kafka.TCP(cfg.Brokers...),
+		Topic:                  cfg.Topic,
+		Balancer:               &kafka.Hash{},
+		AllowAutoTopicCreation: true,
+		BatchSize:              cfg.BatchSize,
+		BatchTimeout:           cfg.BatchTimeout,
+		WriteTimeout:           cfg.WriteTimeout,
+		RequiredAcks:           kafka.RequireAll,
+		Async:                  cfg.Async,
 	}
 
 	if cfg.MaxAttempts > 0 {
@@ -480,13 +482,25 @@ func (p *EngagementProducer) Ping(ctx context.Context) error {
 // NewEngagementWriter creates a Kafka writer for engagement events.
 func NewEngagementWriter(brokers []string, topic string) *kafka.Writer {
 	return &kafka.Writer{
-		Addr:         kafka.TCP(brokers...),
-		Topic:        topic,
-		Balancer:     &kafka.Hash{},
-		BatchSize:    500,            // Higher batch size for engagement volume
-		BatchTimeout: 50 * time.Millisecond,
-		WriteTimeout: 10 * time.Second,
-		RequiredAcks: kafka.RequireOne, // Lower durability for high-volume engagement
-		Async:        false,
+		Addr:                   kafka.TCP(brokers...),
+		Topic:                  topic,
+		Balancer:               &kafka.Hash{},
+		AllowAutoTopicCreation: true,
+		BatchSize:              500, // Higher batch size for engagement volume
+		BatchTimeout:           50 * time.Millisecond,
+		WriteTimeout:           10 * time.Second,
+		RequiredAcks:           kafka.RequireOne, // Lower durability for high-volume engagement
+		Async:                  false,
 	}
+}
+
+// EnsureTopic triggers topic auto-creation by establishing a leader connection.
+// This should be called before first write when using dynamically created topics.
+// The broker must have auto.create.topics.enable=true for this to work.
+func EnsureTopic(ctx context.Context, broker, topic string) error {
+	conn, err := kafka.DialLeader(ctx, "tcp", broker, topic, 0)
+	if err != nil {
+		return fmt.Errorf("failed to ensure topic %s: %w", topic, err)
+	}
+	return conn.Close()
 }

@@ -25,13 +25,13 @@ type ServerConfig struct {
 
 // KafkaConfig holds Kafka connection and topic settings.
 type KafkaConfig struct {
-	BootstrapServers  string
-	TopicPrefix       string
-	TopicEvents       string
-	TopicEngagements  string
-	TopicRetry        string
-	TopicDead         string
-	ProducerTimeout   time.Duration
+	BootstrapServers string
+	TopicPrefix      string
+	TopicEvents      string
+	TopicEngagements string
+	TopicRetry       string
+	TopicDead        string
+	ProducerTimeout  time.Duration
 }
 
 // ClickHouseConfig holds ClickHouse connection settings.
