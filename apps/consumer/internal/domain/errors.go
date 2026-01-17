@@ -1,37 +1,15 @@
 package domain
 
-import "fmt"
+import (
+	sharedDomain "github.com/mabumusa1/football-simulator/pkg/domain"
+)
 
-// ValidationError represents a field validation failure.
-type ValidationError struct {
-	Field   string
-	Message string
-}
+// Re-export types from shared domain package
+type ValidationError = sharedDomain.ValidationError
 
-// Error implements the error interface.
-func (e *ValidationError) Error() string {
-	return fmt.Sprintf("validation error: field '%s' %s", e.Field, e.Message)
-}
-
-// NewValidationError creates a new ValidationError with the given field and message.
-func NewValidationError(field, message string) *ValidationError {
-	return &ValidationError{
-		Field:   field,
-		Message: message,
-	}
-}
-
-// IsValidationError checks if the given error is a ValidationError.
-func IsValidationError(err error) bool {
-	_, ok := err.(*ValidationError)
-	return ok
-}
-
-// AsValidationError attempts to extract a ValidationError from the given error.
-// Returns nil if the error is not a ValidationError.
-func AsValidationError(err error) *ValidationError {
-	if ve, ok := err.(*ValidationError); ok {
-		return ve
-	}
-	return nil
-}
+// Re-export functions from shared domain package
+var (
+	NewValidationError = sharedDomain.NewValidationError
+	IsValidationError  = sharedDomain.IsValidationError
+	AsValidationError  = sharedDomain.AsValidationError
+)

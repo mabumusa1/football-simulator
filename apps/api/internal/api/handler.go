@@ -185,7 +185,7 @@ type HealthResponse struct {
 
 // HealthCheck handles GET /health.
 // It returns a simple health status without checking dependencies.
-func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) HealthCheck(w http.ResponseWriter, _ *http.Request) {
 	response := HealthResponse{
 		Status:    "healthy",
 		Timestamp: time.Now().UTC(),
@@ -239,7 +239,7 @@ func (h *Handler) ReadinessCheck(w http.ResponseWriter, r *http.Request) {
 }
 
 // SwaggerUI handles GET / and serves the Swagger UI documentation.
-func SwaggerUI(w http.ResponseWriter, r *http.Request) {
+func SwaggerUI(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(swaggerUIHTML))
