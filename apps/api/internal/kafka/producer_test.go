@@ -21,6 +21,18 @@ func getKafkaBroker() string {
 	return broker
 }
 
+// ensureTestTopic triggers topic auto-creation before tests write to it.
+// This is needed because kafka-go's Writer alone doesn't reliably trigger
+// topic creation on the broker.
+func ensureTestTopic(t *testing.T, topic string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := EnsureTopic(ctx, getKafkaBroker(), topic); err != nil {
+		t.Fatalf("Failed to ensure topic %s exists: %v", topic, err)
+	}
+}
+
 func createTestEvent() *domain.Event {
 	return &domain.Event{
 		EventID:   uuid.New(),
@@ -196,6 +208,7 @@ func TestNewEventProducer(t *testing.T) {
 func TestEventProducer_Produce(t *testing.T) {
 	brokers := []string{getKafkaBroker()}
 	topic := "test-events-" + uuid.New().String()[:8]
+	ensureTestTopic(t, topic)
 
 	writer := NewWriter(brokers, topic)
 	producer := NewEventProducer(writer, nil)
@@ -236,6 +249,7 @@ func TestEventProducer_Produce_NilEvent(t *testing.T) {
 func TestEventProducer_ProduceBatch(t *testing.T) {
 	brokers := []string{getKafkaBroker()}
 	topic := "test-events-" + uuid.New().String()[:8]
+	ensureTestTopic(t, topic)
 
 	writer := NewWriter(brokers, topic)
 	producer := NewEventProducer(writer, nil)
@@ -276,6 +290,7 @@ func TestEventProducer_ProduceBatch_EmptySlice(t *testing.T) {
 func TestEventProducer_ProduceBatch_WithNilEvents(t *testing.T) {
 	brokers := []string{getKafkaBroker()}
 	topic := "test-events-" + uuid.New().String()[:8]
+	ensureTestTopic(t, topic)
 
 	writer := NewWriter(brokers, topic)
 	producer := NewEventProducer(writer, nil)
@@ -318,6 +333,7 @@ func TestEventProducer_ProduceBatch_AllNil(t *testing.T) {
 func TestEventProducer_ProduceBatch_LargeBatch(t *testing.T) {
 	brokers := []string{getKafkaBroker()}
 	topic := "test-events-" + uuid.New().String()[:8]
+	ensureTestTopic(t, topic)
 
 	writer := NewWriter(brokers, topic)
 	producer := NewEventProducer(writer, nil)
@@ -404,6 +420,7 @@ func TestEventProducer_AllEventTypes(t *testing.T) {
 		t.Run(string(eventType), func(t *testing.T) {
 			brokers := []string{getKafkaBroker()}
 			topic := "test-events-" + uuid.New().String()[:8]
+			ensureTestTopic(t, topic)
 
 			writer := NewWriter(brokers, topic)
 			producer := NewEventProducer(writer, nil)
@@ -457,6 +474,7 @@ func TestNewEngagementProducer(t *testing.T) {
 func TestEngagementProducer_Produce(t *testing.T) {
 	brokers := []string{getKafkaBroker()}
 	topic := "test-engagements-" + uuid.New().String()[:8]
+	ensureTestTopic(t, topic)
 
 	writer := NewEngagementWriter(brokers, topic)
 	producer := NewEngagementProducer(writer, nil)
@@ -497,6 +515,7 @@ func TestEngagementProducer_Produce_NilEvent(t *testing.T) {
 func TestEngagementProducer_ProduceBatch(t *testing.T) {
 	brokers := []string{getKafkaBroker()}
 	topic := "test-engagements-" + uuid.New().String()[:8]
+	ensureTestTopic(t, topic)
 
 	writer := NewEngagementWriter(brokers, topic)
 	producer := NewEngagementProducer(writer, nil)
@@ -537,6 +556,7 @@ func TestEngagementProducer_ProduceBatch_EmptySlice(t *testing.T) {
 func TestEngagementProducer_ProduceBatch_WithNilEvents(t *testing.T) {
 	brokers := []string{getKafkaBroker()}
 	topic := "test-engagements-" + uuid.New().String()[:8]
+	ensureTestTopic(t, topic)
 
 	writer := NewEngagementWriter(brokers, topic)
 	producer := NewEngagementProducer(writer, nil)
@@ -560,6 +580,7 @@ func TestEngagementProducer_ProduceBatch_WithNilEvents(t *testing.T) {
 func TestEngagementProducer_ProduceBatch_LargeBatch(t *testing.T) {
 	brokers := []string{getKafkaBroker()}
 	topic := "test-engagements-" + uuid.New().String()[:8]
+	ensureTestTopic(t, topic)
 
 	writer := NewEngagementWriter(brokers, topic)
 	producer := NewEngagementProducer(writer, nil)
@@ -620,6 +641,7 @@ func TestEngagementProducer_AllEngagementTypes(t *testing.T) {
 		t.Run(string(engagementType), func(t *testing.T) {
 			brokers := []string{getKafkaBroker()}
 			topic := "test-engagements-" + uuid.New().String()[:8]
+			ensureTestTopic(t, topic)
 
 			writer := NewEngagementWriter(brokers, topic)
 			producer := NewEngagementProducer(writer, nil)
@@ -652,6 +674,7 @@ func TestEngagementProducer_AllEngagementTypes(t *testing.T) {
 func TestEventProducer_MessageContent(t *testing.T) {
 	brokers := []string{getKafkaBroker()}
 	topic := "test-events-" + uuid.New().String()[:8]
+	ensureTestTopic(t, topic)
 
 	writer := NewWriter(brokers, topic)
 	producer := NewEventProducer(writer, nil)
@@ -716,6 +739,7 @@ func TestEventProducer_MessageContent(t *testing.T) {
 func TestEngagementProducer_MessageContent(t *testing.T) {
 	brokers := []string{getKafkaBroker()}
 	topic := "test-engagements-" + uuid.New().String()[:8]
+	ensureTestTopic(t, topic)
 
 	writer := NewEngagementWriter(brokers, topic)
 	producer := NewEngagementProducer(writer, nil)
@@ -791,6 +815,7 @@ func TestEngagementProducer_MessageContent(t *testing.T) {
 func TestEventProducer_ConcurrentProduce(t *testing.T) {
 	brokers := []string{getKafkaBroker()}
 	topic := "test-events-" + uuid.New().String()[:8]
+	ensureTestTopic(t, topic)
 
 	writer := NewWriter(brokers, topic)
 	producer := NewEventProducer(writer, nil)
@@ -819,6 +844,7 @@ func TestEventProducer_ConcurrentProduce(t *testing.T) {
 func TestEngagementProducer_ConcurrentProduce(t *testing.T) {
 	brokers := []string{getKafkaBroker()}
 	topic := "test-engagements-" + uuid.New().String()[:8]
+	ensureTestTopic(t, topic)
 
 	writer := NewEngagementWriter(brokers, topic)
 	producer := NewEngagementProducer(writer, nil)
