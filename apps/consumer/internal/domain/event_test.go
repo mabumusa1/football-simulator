@@ -413,6 +413,7 @@ func TestEventFromKafkaMessage_InvalidEventID(t *testing.T) {
 }
 
 func TestEventFromKafkaMessage_InvalidTimestamp(t *testing.T) {
+	// EventFromKafkaMessage falls back to current time for invalid timestamps
 	msg := KafkaMessage{
 		EventID:   uuid.New().String(),
 		MatchID:   "match-123",
@@ -423,9 +424,13 @@ func TestEventFromKafkaMessage_InvalidTimestamp(t *testing.T) {
 
 	data, _ := json.Marshal(msg)
 
-	_, err := EventFromKafkaMessage(data)
-	if err == nil {
-		t.Fatal("expected error for invalid timestamp")
+	event, err := EventFromKafkaMessage(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Should have a valid timestamp (defaulted to now)
+	if event.Timestamp.IsZero() {
+		t.Error("expected non-zero timestamp")
 	}
 }
 

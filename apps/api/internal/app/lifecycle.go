@@ -69,7 +69,8 @@ func WaitForShutdownWithContext(parentCtx context.Context, ctx *AppContext, time
 	signal.Stop(sigCh)
 
 	// Create a context with timeout for graceful shutdown
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), timeout)
+	// Use WithoutCancel to ensure shutdown can complete even if parentCtx is cancelled
+	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(parentCtx), timeout)
 	defer cancel()
 
 	// Perform graceful shutdown

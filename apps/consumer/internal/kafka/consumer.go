@@ -194,66 +194,75 @@ func (c *BatchConsumer) worker(ctx context.Context, workerID int) {
 			c.logger.Info("worker stopping", slog.Int("worker_id", workerID))
 			return
 		default:
-			// Fetch message with a short timeout to allow checking for shutdown
-			fetchCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
-			msg, err := c.reader.FetchMessage(fetchCtx)
-			cancel()
-
-			if err != nil {
-				// Check if context was cancelled or timeout
-				if ctx.Err() != nil {
-					continue
-				}
-				// Timeout is expected when no messages are available
-				if fetchCtx.Err() == context.DeadlineExceeded {
-					continue
-				}
-				c.logger.Error("failed to fetch message",
-					slog.Int("worker_id", workerID),
-					slog.String("error", err.Error()),
-				)
-				continue
-			}
-
-			// Update consumer lag metric
-			c.updateLagMetric(msg)
-
-			// Parse the message
-			event, err := domain.EventFromKafkaMessage(msg.Value)
-			if err != nil {
-				c.logger.Error("failed to parse message",
-					slog.String("error", err.Error()),
-					slog.Int64("offset", msg.Offset),
-					slog.Int("partition", msg.Partition),
-				)
-				kafkaEventsConsumed.WithLabelValues("parse_error").Inc()
-				// Commit the message even if parsing failed to avoid reprocessing
-				if commitErr := c.reader.CommitMessages(ctx, msg); commitErr != nil {
-					c.logger.Error("failed to commit message after parse error",
-						slog.String("error", commitErr.Error()),
-					)
-				}
-				continue
-			}
-
-			// Add to batch
-			c.batchLock.Lock()
-			c.batch = append(c.batch, event)
-			c.messages = append(c.messages, msg)
-			batchLen := len(c.batch)
-			c.batchLock.Unlock()
-
-			c.logger.Debug("message added to batch",
-				slog.Int("worker_id", workerID),
-				slog.String("event_id", event.EventID.String()),
-				slog.Int("batch_size", batchLen),
-			)
-
-			// Flush if batch is full
-			if batchLen >= c.batchSize {
-				c.flushWithContext(ctx)
-			}
+			c.processMessage(ctx, workerID)
 		}
+	}
+}
+
+// processMessage fetches and processes a single message from Kafka.
+func (c *BatchConsumer) processMessage(ctx context.Context, workerID int) {
+	fetchCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
+	msg, err := c.reader.FetchMessage(fetchCtx)
+	cancel()
+
+	if err != nil {
+		c.handleFetchError(ctx, fetchCtx, workerID, err)
+		return
+	}
+
+	c.updateLagMetric(msg)
+
+	event, err := domain.EventFromKafkaMessage(msg.Value)
+	if err != nil {
+		c.handleParseError(ctx, msg, err)
+		return
+	}
+
+	c.addToBatch(ctx, msg, event, workerID)
+}
+
+// handleFetchError handles errors from fetching messages.
+func (c *BatchConsumer) handleFetchError(ctx, fetchCtx context.Context, workerID int, err error) {
+	if ctx.Err() != nil || fetchCtx.Err() == context.DeadlineExceeded {
+		return
+	}
+	c.logger.Error("failed to fetch message",
+		slog.Int("worker_id", workerID),
+		slog.String("error", err.Error()),
+	)
+}
+
+// handleParseError handles errors from parsing messages.
+func (c *BatchConsumer) handleParseError(ctx context.Context, msg kafka.Message, err error) {
+	c.logger.Error("failed to parse message",
+		slog.String("error", err.Error()),
+		slog.Int64("offset", msg.Offset),
+		slog.Int("partition", msg.Partition),
+	)
+	kafkaEventsConsumed.WithLabelValues("parse_error").Inc()
+	if commitErr := c.reader.CommitMessages(ctx, msg); commitErr != nil {
+		c.logger.Error("failed to commit message after parse error",
+			slog.String("error", commitErr.Error()),
+		)
+	}
+}
+
+// addToBatch adds an event to the batch and flushes if needed.
+func (c *BatchConsumer) addToBatch(ctx context.Context, msg kafka.Message, event *domain.Event, workerID int) {
+	c.batchLock.Lock()
+	c.batch = append(c.batch, event)
+	c.messages = append(c.messages, msg)
+	batchLen := len(c.batch)
+	c.batchLock.Unlock()
+
+	c.logger.Debug("message added to batch",
+		slog.Int("worker_id", workerID),
+		slog.String("event_id", event.EventID.String()),
+		slog.Int("batch_size", batchLen),
+	)
+
+	if batchLen >= c.batchSize {
+		c.flushWithContext(ctx)
 	}
 }
 
@@ -268,11 +277,17 @@ func (c *BatchConsumer) flusher(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			c.logger.Info("flusher stopping, final flush")
-			c.flushWithContext(context.Background())
+			// Use a non-cancellable context with timeout for final flush
+			finalCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+			c.flushWithContext(finalCtx)
+			cancel()
 			return
 		case <-c.done:
 			c.logger.Info("flusher stopping, final flush")
-			c.flushWithContext(context.Background())
+			// Use a non-cancellable context with timeout for final flush
+			finalCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+			c.flushWithContext(finalCtx)
+			cancel()
 			return
 		case <-c.ticker.C:
 			c.flushWithContext(ctx)
@@ -361,55 +376,78 @@ func (c *BatchConsumer) sendToRetry(ctx context.Context, events []*domain.Event,
 		slog.Int("event_count", len(events)),
 	)
 
-	retryMessages := make([]kafka.Message, 0, len(events))
-	for i, event := range events {
-		value, err := event.ToKafkaMessage()
-		if err != nil {
-			c.logger.Warn("failed to serialize event for retry",
-				slog.String("event_id", event.EventID.String()),
-				slog.String("error", err.Error()),
-			)
-			continue
-		}
-
-		// Extract retry count from original message headers
-		retryCount := 0
-		if i < len(originalMessages) {
-			for _, header := range originalMessages[i].Headers {
-				if header.Key == "retry_count" && len(header.Value) > 0 {
-					retryCount = int(header.Value[0])
-				}
-			}
-		}
-		retryCount++
-
-		// Check if max retries exceeded
-		if retryCount > c.maxRetries {
-			c.logger.Warn("max retries exceeded, sending to dead letter",
-				slog.String("event_id", event.EventID.String()),
-				slog.Int("retry_count", retryCount),
-			)
-			c.sendSingleToDead(ctx, event)
-			continue
-		}
-
-		msg := kafka.Message{
-			Key:   []byte(event.MatchID),
-			Value: value,
-			Headers: []kafka.Header{
-				{Key: "event_type", Value: []byte(string(event.EventType))},
-				{Key: "event_id", Value: []byte(event.EventID.String())},
-				{Key: "retry_count", Value: []byte{byte(retryCount)}},
-				{Key: "original_timestamp", Value: []byte(event.Timestamp.Format(time.RFC3339Nano))},
-			},
-		}
-		retryMessages = append(retryMessages, msg)
-	}
-
+	retryMessages := c.prepareRetryMessages(ctx, events, originalMessages)
 	if len(retryMessages) == 0 {
 		return
 	}
 
+	c.writeRetryMessages(ctx, retryMessages, events, originalMessages)
+}
+
+// prepareRetryMessages prepares messages for the retry topic.
+func (c *BatchConsumer) prepareRetryMessages(ctx context.Context, events []*domain.Event, originalMessages []kafka.Message) []kafka.Message {
+	retryMessages := make([]kafka.Message, 0, len(events))
+
+	for i, event := range events {
+		msg, ok := c.prepareRetryMessage(ctx, event, originalMessages, i)
+		if ok {
+			retryMessages = append(retryMessages, msg)
+		}
+	}
+
+	return retryMessages
+}
+
+// prepareRetryMessage prepares a single retry message.
+func (c *BatchConsumer) prepareRetryMessage(ctx context.Context, event *domain.Event, originalMessages []kafka.Message, index int) (kafka.Message, bool) {
+	value, err := event.ToKafkaMessage()
+	if err != nil {
+		c.logger.Warn("failed to serialize event for retry",
+			slog.String("event_id", event.EventID.String()),
+			slog.String("error", err.Error()),
+		)
+		return kafka.Message{}, false
+	}
+
+	retryCount := c.extractRetryCount(originalMessages, index) + 1
+
+	if retryCount > c.maxRetries {
+		c.logger.Warn("max retries exceeded, sending to dead letter",
+			slog.String("event_id", event.EventID.String()),
+			slog.Int("retry_count", retryCount),
+		)
+		c.sendSingleToDead(ctx, event)
+		return kafka.Message{}, false
+	}
+
+	return kafka.Message{
+		Key:   []byte(event.MatchID),
+		Value: value,
+		Headers: []kafka.Header{
+			{Key: "event_type", Value: []byte(string(event.EventType))},
+			{Key: "event_id", Value: []byte(event.EventID.String())},
+			{Key: "retry_count", Value: []byte{byte(retryCount)}},
+			{Key: "original_timestamp", Value: []byte(event.Timestamp.Format(time.RFC3339Nano))},
+		},
+	}, true
+}
+
+// extractRetryCount extracts the retry count from message headers.
+func (c *BatchConsumer) extractRetryCount(originalMessages []kafka.Message, index int) int {
+	if index >= len(originalMessages) {
+		return 0
+	}
+
+	for _, header := range originalMessages[index].Headers {
+		if header.Key == "retry_count" && len(header.Value) > 0 {
+			return int(header.Value[0])
+		}
+	}
+	return 0
+}
+
+// writeRetryMessages writes messages to the retry topic.
+func (c *BatchConsumer) writeRetryMessages(ctx context.Context, retryMessages []kafka.Message, events []*domain.Event, originalMessages []kafka.Message) {
 	err := c.retryWriter.WriteMessages(ctx, retryMessages...)
 	if err != nil {
 		c.logger.Error("failed to write to retry topic, sending to dead letter",
@@ -426,13 +464,19 @@ func (c *BatchConsumer) sendToRetry(ctx context.Context, events []*domain.Event,
 	)
 	kafkaRetryEvents.WithLabelValues("success").Add(float64(len(retryMessages)))
 
-	// Commit original messages since we've sent to retry
-	if len(originalMessages) > 0 {
-		if err := c.reader.CommitMessages(ctx, originalMessages...); err != nil {
-			c.logger.Error("failed to commit messages after retry",
-				slog.String("error", err.Error()),
-			)
-		}
+	c.commitOriginalMessages(ctx, originalMessages)
+}
+
+// commitOriginalMessages commits the original messages after retry.
+func (c *BatchConsumer) commitOriginalMessages(ctx context.Context, originalMessages []kafka.Message) {
+	if len(originalMessages) == 0 {
+		return
+	}
+
+	if err := c.reader.CommitMessages(ctx, originalMessages...); err != nil {
+		c.logger.Error("failed to commit messages after retry",
+			slog.String("error", err.Error()),
+		)
 	}
 }
 

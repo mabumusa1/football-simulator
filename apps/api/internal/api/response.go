@@ -18,11 +18,9 @@ func respondJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.WriteHeader(status)
 
 	if data != nil {
-		if err := json.NewEncoder(w).Encode(data); err != nil {
-			// If encoding fails, we've already written the header,
-			// so we can only log this error (handled by caller's middleware)
-			return
-		}
+		// Encode response; if it fails, we've already written the header,
+		// so we can only rely on caller's middleware for error handling
+		_ = json.NewEncoder(w).Encode(data)
 	}
 }
 
