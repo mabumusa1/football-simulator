@@ -4,18 +4,16 @@ services:
   traefik:
     image: traefik:v3.6.7
 
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+
     networks:
       - traefik-public
 
     ports:
-      - target: 80
-        published: 80
-        protocol: tcp
-        mode: host
-      - target: 443
-        published: 443
-        protocol: tcp
-        mode: host
+      - "80:80"
+      - "443:443"
 
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -37,7 +35,7 @@ services:
       - "--providers.swarm=true"
       - "--providers.swarm.endpoint=unix:///var/run/docker.sock"
       - "--providers.swarm.exposedByDefault=false"
-      - "--providers.swarm.network=traefik-public"
+      - "--providers.swarm.network=compose_traefik-public"
       - "--providers.swarm.watch=true"
 
       # Let's Encrypt
@@ -68,5 +66,6 @@ services:
         - "traefik.http.routers.dashboard.tls=true"
         - "traefik.http.routers.dashboard.tls.certresolver=letsencrypt"
         - "traefik.http.routers.dashboard.service=api@internal"
+        - "traefik.http.services.dummy.loadbalancer.server.port=9999"
         - "traefik.http.middlewares.dashboard-auth.basicauth.users=${TRAEFIK_AUTH}"
         - "traefik.http.routers.dashboard.middlewares=dashboard-auth"

@@ -1,144 +1,456 @@
 name: Build and Deploy
 
 on:
+  push:
+    tags:
+      - 'v*.*.*'
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version tag to deploy (e.g., v1.0.0)'
-        required: true
+        description: 'Version tag to deploy (e.g., v1.0.0). Leave empty to use git SHA.'
+        required: false
         type: string
+      deploy_infra:
+        description: 'Deploy infrastructure services (traefik, kafka, clickhouse, monitoring)'
+        required: false
+        type: boolean
+        default: false
 
 # Prevent concurrent deployments
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: deploy-${{ github.ref }}
   cancel-in-progress: false
 
 env:
   AWS_REGION: ${{ vars.AWS_REGION }}
   AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
   AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
-  ECR_REGISTRY: ${{ vars.ECR_REGISTRY }}
-  STACK_NAME: ${{ vars.STACK_NAME }}
+  ECR_REGISTRY: ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com
+  ECR_REPO_PREFIX: football-dev
+  STACK_NAME: football-simulator
   EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
 
 jobs:
   # ===========================================================================
-  # BUILD JOB - Build and push Docker images to ECR
+  # VALIDATE JOB - Validate configuration before building
+  # ===========================================================================
+  validate:
+    name: Validate Configuration
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Validate Docker Compose files
+        run: |
+          # Create a minimal .env for validation
+          cat > .env << 'EOF'
+          DOMAIN=example.com
+          REGISTRY=localhost:5000
+          VERSION=latest
+          API_KEY=test
+          CLICKHOUSE_PASSWORD=test
+          GRAFANA_PASSWORD=test
+          LETSENCRYPT_EMAIL=test@example.com
+          TRAEFIK_AUTH=admin:test
+          PROMETHEUS_AUTH=admin:test
+          EOF
+
+          # Validate all compose files can be merged
+          docker compose \
+            --env-file .env \
+            -f infra/compose/base.yml \
+            -f infra/compose/prod/traefik.yml \
+            -f infra/compose/prod/kafka.yml \
+            -f infra/compose/prod/clickhouse.yml \
+            -f infra/compose/prod/go-api.yml \
+            -f infra/compose/prod/go-consumer.yml \
+            -f infra/compose/prod/monitoring.yml \
+            config > /dev/null
+
+          echo "✅ Compose configuration is valid"
+
+      - name: Validate Dockerfiles
+        run: |
+          # Check Dockerfiles exist and have correct build context
+          for dockerfile in apps/api/Dockerfile apps/consumer/Dockerfile; do
+            if [[ ! -f "$dockerfile" ]]; then
+              echo "❌ Missing: $dockerfile"
+              exit 1
+            fi
+            echo "✅ Found: $dockerfile"
+          done
+
+          # Verify shared pkg directory exists
+          if [[ ! -d "pkg" ]]; then
+            echo "❌ Missing shared pkg directory"
+            exit 1
+          fi
+          echo "✅ Shared pkg directory exists"
+
+  # ===========================================================================
+  # BUILD JOB - Build and push Docker images to ECR (parallel builds)
   # ===========================================================================
   build:
-    name: Build Docker Images
+    name: Build ${{ matrix.app }}
     runs-on: ubuntu-latest
+    needs: validate
+
     permissions:
-      id-token: write   # Required for OIDC
+      id-token: write
       contents: read
+
+    strategy:
+      matrix:
+        include:
+          - app: api
+            dockerfile: apps/api/Dockerfile
+            image: go-api
+          - app: consumer
+            dockerfile: apps/consumer/Dockerfile
+            image: go-consumer
 
     outputs:
       version: ${{ steps.version.outputs.version }}
-      go_api_image: ${{ steps.build-api.outputs.image }}
-      go_consumer_image: ${{ steps.build-consumer.outputs.image }}
 
     steps:
-      # -----------------------------------------------------------------------
-      # Checkout and Version Detection
-      # -----------------------------------------------------------------------
       - name: Checkout code
         uses: actions/checkout@v6
 
       - name: Determine version
         id: version
         run: |
-          VERSION="${{ github.event.inputs.version }}"
+          if [[ "${{ github.event_name }}" == "push" && "${{ github.ref_type }}" == "tag" ]]; then
+            # Use git tag for version
+            VERSION="${{ github.ref_name }}"
+          elif [[ -n "${{ github.event.inputs.version }}" ]]; then
+            # Use manual input version
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            # Use short SHA as version
+            VERSION="sha-${GITHUB_SHA::8}"
+          fi
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          echo "Deploying version: ${VERSION}"
+          echo "📦 Building version: ${VERSION}"
 
-      # -----------------------------------------------------------------------
-      # AWS Authentication via OIDC
-      # -----------------------------------------------------------------------
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v5
         with:
           role-to-assume: ${{ env.AWS_ROLE_ARN }}
-          role-session-name: GitHubActions-${{ github.run_id }}
+          role-session-name: GitHubActions-Build-${{ github.run_id }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR
-        id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      # -----------------------------------------------------------------------
-      # Set up Docker Buildx for multi-platform builds
-      # -----------------------------------------------------------------------
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # -----------------------------------------------------------------------
-      # Build and Push go-api
-      # -----------------------------------------------------------------------
-      - name: Build and push go-api
-        id: build-api
+      - name: Build and push ${{ matrix.app }}
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: apps/api/Dockerfile
+          file: ${{ matrix.dockerfile }}
           push: true
           tags: |
-            ${{ env.ECR_REGISTRY }}/${{ env.STACK_NAME }}/go-api:${{ steps.version.outputs.version }}
-            ${{ env.ECR_REGISTRY }}/${{ env.STACK_NAME }}/go-api:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+            ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPO_PREFIX }}/${{ matrix.image }}:${{ steps.version.outputs.version }}
+            ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPO_PREFIX }}/${{ matrix.image }}:${{ github.sha }}
+            ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPO_PREFIX }}/${{ matrix.image }}:latest
+          cache-from: type=gha,scope=${{ matrix.app }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.app }}
           platforms: linux/amd64
           provenance: false
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
+            COMMIT_SHA=${{ github.sha }}
 
-      - name: Output go-api image
-        id: build-api-output
-        run: |
-          echo "image=${{ env.ECR_REGISTRY }}/${{ env.STACK_NAME }}/go-api:${{ steps.version.outputs.version }}" >> $GITHUB_OUTPUT
-
-      # -----------------------------------------------------------------------
-      # Build and Push go-consumer
-      # -----------------------------------------------------------------------
-      - name: Build and push go-consumer
-        id: build-consumer
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: apps/consumer/Dockerfile
-          push: true
-          tags: |
-            ${{ env.ECR_REGISTRY }}/${{ env.STACK_NAME }}/go-consumer:${{ steps.version.outputs.version }}
-            ${{ env.ECR_REGISTRY }}/${{ env.STACK_NAME }}/go-consumer:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          platforms: linux/amd64
-          provenance: false
-
-      - name: Output go-consumer image
-        id: build-consumer-output
-        run: |
-          echo "image=${{ env.ECR_REGISTRY }}/${{ env.STACK_NAME }}/go-consumer:${{ steps.version.outputs.version }}" >> $GITHUB_OUTPUT
-
-      # -----------------------------------------------------------------------
-      # Build Summary
-      # -----------------------------------------------------------------------
       - name: Build summary
         run: |
-          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "## ${{ matrix.app }} Build" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Image | Tag |" >> $GITHUB_STEP_SUMMARY
-          echo "|-------|-----|" >> $GITHUB_STEP_SUMMARY
-          echo "| go-api | \`${{ steps.version.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| go-consumer | \`${{ steps.version.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Image | \`${{ env.ECR_REPO_PREFIX }}/${{ matrix.image }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | \`${{ steps.version.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| SHA | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
 
   # ===========================================================================
-  # DEPLOY JOB - Deploy to EC2 via SSM
+  # DEPLOY JOB - Deploy to EC2 via SSM with rollback support
   # ===========================================================================
   deploy:
     name: Deploy to EC2
     runs-on: ubuntu-latest
     needs: build
-    environment: demo
+    environment: production
+
+    permissions:
+      id-token: write
+      contents: read
+
+    outputs:
+      previous_version: ${{ steps.get-previous.outputs.version }}
+      deployed_version: ${{ needs.build.outputs.version }}
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          role-session-name: GitHubActions-Deploy-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get previous version for rollback
+        id: get-previous
+        run: |
+          INSTANCE_ID="${{ env.EC2_INSTANCE_ID }}"
+
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "${INSTANCE_ID}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters 'commands=["grep ^VERSION= /opt/football/app/.env | cut -d= -f2"]' \
+            --output text \
+            --query "Command.CommandId")
+
+          sleep 5
+
+          PREV_VERSION=$(aws ssm get-command-invocation \
+            --command-id "${COMMAND_ID}" \
+            --instance-id "${INSTANCE_ID}" \
+            --query "StandardOutputContent" \
+            --output text | tr -d '\n')
+
+          echo "version=${PREV_VERSION}" >> $GITHUB_OUTPUT
+          echo "📋 Previous version: ${PREV_VERSION}"
+
+      - name: Sync infrastructure files
+        run: |
+          VERSION="${{ needs.build.outputs.version }}"
+          INSTANCE_ID="${{ env.EC2_INSTANCE_ID }}"
+
+          echo "🔄 Syncing infrastructure files..."
+
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "${INSTANCE_ID}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters 'commands=[
+              "cd /opt/football/app",
+              "echo \"Fetching latest changes...\"",
+              "git fetch origin main",
+              "echo \"Syncing compose files...\"",
+              "git checkout origin/main -- infra/compose/",
+              "git checkout origin/main -- scripts/deploy.sh",
+              "echo \"✅ Infrastructure files synced\""
+            ]' \
+            --timeout-seconds 120 \
+            --output text \
+            --query "Command.CommandId")
+
+          aws ssm wait command-executed \
+            --command-id "${COMMAND_ID}" \
+            --instance-id "${INSTANCE_ID}" || true
+
+          STATUS=$(aws ssm get-command-invocation \
+            --command-id "${COMMAND_ID}" \
+            --instance-id "${INSTANCE_ID}" \
+            --query "Status" \
+            --output text)
+
+          if [[ "${STATUS}" != "Success" ]]; then
+            echo "::warning::Failed to sync infrastructure files"
+          fi
+
+      - name: Deploy application
+        id: deploy
+        run: |
+          VERSION="${{ needs.build.outputs.version }}"
+          INSTANCE_ID="${{ env.EC2_INSTANCE_ID }}"
+          ECR_REGISTRY="${{ env.ECR_REGISTRY }}"
+          ECR_REPO_PREFIX="${{ env.ECR_REPO_PREFIX }}"
+
+          echo "🚀 Deploying version ${VERSION}..."
+
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "${INSTANCE_ID}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters commands="[
+              \"cd /opt/football/app\",
+              \"echo '📦 Updating VERSION in .env...'\",
+              \"sed -i 's/^VERSION=.*/VERSION=${VERSION}/' .env\",
+              \"echo '🔐 Logging into ECR...'\",
+              \"aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${ECR_REGISTRY}\",
+              \"echo '📥 Pulling new images...'\",
+              \"docker pull ${ECR_REGISTRY}/${ECR_REPO_PREFIX}/go-api:${VERSION}\",
+              \"docker pull ${ECR_REGISTRY}/${ECR_REPO_PREFIX}/go-consumer:${VERSION}\",
+              \"echo '🔄 Deploying services...'\",
+              \"./scripts/deploy.sh go-api go-consumer\",
+              \"echo '✅ Deployment command completed'\",
+              \"docker service ls\"
+            ]" \
+            --timeout-seconds 300 \
+            --output text \
+            --query "Command.CommandId")
+
+          echo "command_id=${COMMAND_ID}" >> $GITHUB_OUTPUT
+          echo "Command ID: ${COMMAND_ID}"
+
+          # Wait for deployment to complete
+          echo "⏳ Waiting for deployment..."
+          aws ssm wait command-executed \
+            --command-id "${COMMAND_ID}" \
+            --instance-id "${INSTANCE_ID}" || true
+
+          # Get result
+          RESULT=$(aws ssm get-command-invocation \
+            --command-id "${COMMAND_ID}" \
+            --instance-id "${INSTANCE_ID}" \
+            --query "[Status, StandardOutputContent, StandardErrorContent]" \
+            --output json)
+
+          STATUS=$(echo $RESULT | jq -r '.[0]')
+          STDOUT=$(echo $RESULT | jq -r '.[1]')
+          STDERR=$(echo $RESULT | jq -r '.[2]')
+
+          echo "Status: ${STATUS}"
+          echo "Output:"
+          echo "${STDOUT}"
+
+          if [[ "${STATUS}" != "Success" ]]; then
+            echo "::error::Deployment failed"
+            echo "STDERR: ${STDERR}"
+            exit 1
+          fi
+
+      - name: Verify deployment health
+        id: health-check
+        run: |
+          INSTANCE_ID="${{ env.EC2_INSTANCE_ID }}"
+
+          echo "🏥 Running health checks..."
+
+          # Health check that works with Docker Swarm overlay networks
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "${INSTANCE_ID}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters 'commands=[
+              "echo \"Waiting for services to be ready...\"",
+              "sleep 30",
+              "for i in {1..30}; do",
+              "  echo \"Health check attempt $i/30\"",
+              "  ",
+              "  # Check if go-api replicas are running",
+              "  API_REPLICAS=$(docker service ls --filter name=football-simulator_go-api --format \"{{.Replicas}}\" | cut -d/ -f1)",
+              "  CONSUMER_REPLICAS=$(docker service ls --filter name=football-simulator_go-consumer --format \"{{.Replicas}}\" | cut -d/ -f1)",
+              "  ",
+              "  if [[ \"$API_REPLICAS\" -ge 1 && \"$CONSUMER_REPLICAS\" -ge 1 ]]; then",
+              "    # Check health via container exec",
+              "    CONTAINER_ID=$(docker ps --filter \"name=go-api\" --format \"{{.ID}}\" | head -1)",
+              "    if [ -n \"$CONTAINER_ID\" ]; then",
+              "      HEALTH=$(docker exec $CONTAINER_ID wget -qO- http://localhost:8080/health 2>/dev/null || echo \"\")",
+              "      if echo \"$HEALTH\" | grep -q healthy; then",
+              "        echo \"✅ API health check passed!\"",
+              "        echo \"Response: $HEALTH\"",
+              "        docker service ls",
+              "        exit 0",
+              "      fi",
+              "    fi",
+              "  fi",
+              "  ",
+              "  echo \"Waiting... (API: $API_REPLICAS replicas, Consumer: $CONSUMER_REPLICAS replicas)\"",
+              "  sleep 10",
+              "done",
+              "echo \"❌ Health check failed after 30 attempts\"",
+              "docker service ls",
+              "docker service ps football-simulator_go-api --no-trunc | head -10",
+              "exit 1"
+            ]' \
+            --timeout-seconds 600 \
+            --output text \
+            --query "Command.CommandId")
+
+          echo "Health check command ID: ${COMMAND_ID}"
+
+          aws ssm wait command-executed \
+            --command-id "${COMMAND_ID}" \
+            --instance-id "${INSTANCE_ID}" || true
+
+          RESULT=$(aws ssm get-command-invocation \
+            --command-id "${COMMAND_ID}" \
+            --instance-id "${INSTANCE_ID}" \
+            --query "[Status, StandardOutputContent, StandardErrorContent]" \
+            --output json)
+
+          STATUS=$(echo $RESULT | jq -r '.[0]')
+          STDOUT=$(echo $RESULT | jq -r '.[1]')
+
+          echo "${STDOUT}"
+
+          if [[ "${STATUS}" != "Success" ]]; then
+            echo "deploy_failed=true" >> $GITHUB_OUTPUT
+            echo "::error::Health check failed!"
+          else
+            echo "deploy_failed=false" >> $GITHUB_OUTPUT
+            echo "::notice::✅ Deployment health check passed!"
+          fi
+
+      - name: Rollback on failure
+        if: steps.health-check.outputs.deploy_failed == 'true'
+        run: |
+          PREV_VERSION="${{ steps.get-previous.outputs.version }}"
+          INSTANCE_ID="${{ env.EC2_INSTANCE_ID }}"
+          ECR_REGISTRY="${{ env.ECR_REGISTRY }}"
+          ECR_REPO_PREFIX="${{ env.ECR_REPO_PREFIX }}"
+
+          echo "🔙 Rolling back to version ${PREV_VERSION}..."
+
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "${INSTANCE_ID}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters commands="[
+              \"cd /opt/football/app\",
+              \"echo 'Rolling back to ${PREV_VERSION}...'\",
+              \"sed -i 's/^VERSION=.*/VERSION=${PREV_VERSION}/' .env\",
+              \"docker pull ${ECR_REGISTRY}/${ECR_REPO_PREFIX}/go-api:${PREV_VERSION} || true\",
+              \"docker pull ${ECR_REGISTRY}/${ECR_REPO_PREFIX}/go-consumer:${PREV_VERSION} || true\",
+              \"./scripts/deploy.sh go-api go-consumer\",
+              \"echo 'Rollback completed'\",
+              \"docker service ls\"
+            ]" \
+            --timeout-seconds 300 \
+            --output text \
+            --query "Command.CommandId")
+
+          aws ssm wait command-executed \
+            --command-id "${COMMAND_ID}" \
+            --instance-id "${INSTANCE_ID}" || true
+
+          echo "::warning::Rolled back to version ${PREV_VERSION}"
+          exit 1
+
+      - name: Deployment summary
+        if: always()
+        run: |
+          echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | \`${{ needs.build.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Previous | \`${{ steps.get-previous.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Instance | \`${{ env.EC2_INSTANCE_ID }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | ${{ steps.health-check.outputs.deploy_failed == 'true' && '❌ Failed (Rolled back)' || '✅ Success' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Endpoints" >> $GITHUB_STEP_SUMMARY
+          echo "- API: https://api.football.capibridge.com/health" >> $GITHUB_STEP_SUMMARY
+          echo "- Grafana: https://grafana.football.capibridge.com" >> $GITHUB_STEP_SUMMARY
+
+  # ===========================================================================
+  # DEPLOY INFRASTRUCTURE (optional)
+  # ===========================================================================
+  deploy-infra:
+    name: Deploy Infrastructure
+    runs-on: ubuntu-latest
+    needs: [build, deploy]
+    if: github.event.inputs.deploy_infra == 'true'
 
     permissions:
       id-token: write
@@ -149,110 +461,39 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v5
         with:
           role-to-assume: ${{ env.AWS_ROLE_ARN }}
-          role-session-name: GitHubActions-Deploy-${{ github.run_id }}
+          role-session-name: GitHubActions-Infra-${{ github.run_id }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Deploy via SSM
-        id: deploy
+      - name: Deploy infrastructure services
         run: |
-          VERSION="${{ needs.build.outputs.version }}"
           INSTANCE_ID="${{ env.EC2_INSTANCE_ID }}"
 
-          echo "Deploying version ${VERSION} to instance ${INSTANCE_ID}..."
+          echo "🏗️ Deploying infrastructure services..."
 
-          # Send deployment command via SSM
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids "${INSTANCE_ID}" \
             --document-name "AWS-RunShellScript" \
-            --parameters commands="[
-              \"cd /opt/football/app\",
-              \"echo 'Pulling latest code...'\",
-              \"git pull origin main\",
-              \"echo 'Updating VERSION in .env...'\",
-              \"sed -i 's/^VERSION=.*/VERSION=${VERSION}/' .env\",
-              \"echo 'Logging into ECR...'\",
-              \"aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}\",
-              \"echo 'Pulling new images...'\",
-              \"docker pull ${ECR_REGISTRY}/${STACK_NAME}/go-api:${VERSION}\",
-              \"docker pull ${ECR_REGISTRY}/${STACK_NAME}/go-consumer:${VERSION}\",
-              \"echo 'Deploying services...'\",
-              \"./scripts/deploy.sh go-api go-consumer\",
-              \"echo 'Deployment complete!'\",
-              \"docker service ls\"
-            ]" \
-            --timeout-seconds 300 \
-            --output text \
-            --query "Command.CommandId")
-
-          echo "Command ID: ${COMMAND_ID}"
-          echo "command_id=${COMMAND_ID}" >> $GITHUB_OUTPUT
-
-          # Wait for command to complete
-          echo "Waiting for deployment to complete..."
-          aws ssm wait command-executed \
-            --command-id "${COMMAND_ID}" \
-            --instance-id "${INSTANCE_ID}" || true
-
-          # Get command output
-          RESULT=$(aws ssm get-command-invocation \
-            --command-id "${COMMAND_ID}" \
-            --instance-id "${INSTANCE_ID}" \
-            --query "[Status, StatusDetails, StandardOutputContent, StandardErrorContent]" \
-            --output json)
-
-          STATUS=$(echo $RESULT | jq -r '.[0]')
-          STATUS_DETAILS=$(echo $RESULT | jq -r '.[1]')
-          STDOUT=$(echo $RESULT | jq -r '.[2]')
-          STDERR=$(echo $RESULT | jq -r '.[3]')
-
-          echo "Status: ${STATUS}"
-          echo "Details: ${STATUS_DETAILS}"
-
-          if [[ "${STATUS}" == "Success" ]]; then
-            echo "Deployment successful!"
-            echo "::notice::Deployment of version ${VERSION} completed successfully"
-          else
-            echo "Deployment failed!"
-            echo "STDOUT: ${STDOUT}"
-            echo "STDERR: ${STDERR}"
-            exit 1
-          fi
-
-      - name: Verify deployment health
-        id: health-check
-        run: |
-          echo "Waiting for service to become healthy..."
-          INSTANCE_ID="${{ env.EC2_INSTANCE_ID }}"
-
-          # Run health check via SSM
-          COMMAND_ID=$(aws ssm send-command \
-            --instance-ids "${INSTANCE_ID}" \
-            --document-name "AWS-RunShellScript" \
-            --parameters commands="[
-              \"for i in {1..30}; do\",
-              \"  STATUS=\\$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/health || echo '000')\",
-              \"  if [ \\\"\\$STATUS\\\" = '200' ]; then\",
-              \"    echo 'API health check passed!'\",
-              \"    exit 0\",
-              \"  fi\",
-              \"  echo \\\"Attempt \\$i: Status \\$STATUS, retrying in 10s...\\\"\",
-              \"  sleep 10\",
-              \"done\",
-              \"echo 'Health check failed after 30 attempts'\",
-              \"exit 1\"
-            ]" \
+            --parameters 'commands=[
+              "cd /opt/football/app",
+              "echo \"Deploying Traefik...\"",
+              "./scripts/deploy.sh traefik",
+              "echo \"Deploying Kafka...\"",
+              "./scripts/deploy.sh kafka",
+              "echo \"Deploying ClickHouse...\"",
+              "./scripts/deploy.sh clickhouse",
+              "echo \"Deploying Monitoring...\"",
+              "./scripts/deploy.sh monitoring",
+              "echo \"✅ Infrastructure deployment complete\"",
+              "docker service ls"
+            ]' \
             --timeout-seconds 600 \
             --output text \
             --query "Command.CommandId")
 
-          echo "Health check command ID: ${COMMAND_ID}"
-
-          # Wait for health check to complete
           aws ssm wait command-executed \
             --command-id "${COMMAND_ID}" \
             --instance-id "${INSTANCE_ID}" || true
 
-          # Get result
           RESULT=$(aws ssm get-command-invocation \
             --command-id "${COMMAND_ID}" \
             --instance-id "${INSTANCE_ID}" \
@@ -260,33 +501,23 @@ jobs:
             --output json)
 
           STATUS=$(echo $RESULT | jq -r '.[0]')
-          OUTPUT=$(echo $RESULT | jq -r '.[1]')
+          STDOUT=$(echo $RESULT | jq -r '.[1]')
 
-          echo "$OUTPUT"
+          echo "${STDOUT}"
 
           if [[ "${STATUS}" != "Success" ]]; then
-            echo "::error::Health check failed!"
+            echo "::error::Infrastructure deployment failed"
             exit 1
           fi
 
-          echo "::notice::Deployment health check passed!"
-
-      - name: Deployment summary
-        run: |
-          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Version:** \`${{ needs.build.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Instance:** \`${{ env.EC2_INSTANCE_ID }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Status:** ✅ Success (Health check passed)" >> $GITHUB_STEP_SUMMARY
-
   # ===========================================================================
-  # CREATE RELEASE (only for version tags)
+  # CREATE RELEASE
   # ===========================================================================
   release:
     name: Create Release
     runs-on: ubuntu-latest
     needs: [build, deploy]
-    if: startsWith(github.event.inputs.version, 'v')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
 
     permissions:
       contents: write
@@ -294,26 +525,51 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # Get previous tag
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+
+          if [[ -n "${PREV_TAG}" ]]; then
+            echo "## Changes since ${PREV_TAG}" > changelog.md
+            echo "" >> changelog.md
+            git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" >> changelog.md
+          else
+            echo "## Initial Release" > changelog.md
+          fi
+
+          cat changelog.md
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ needs.build.outputs.version }}
-          name: Release ${{ needs.build.outputs.version }}
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
           body: |
             ## Docker Images
 
-            - `${{ env.ECR_REGISTRY }}/${{ env.STACK_NAME }}/go-api:${{ needs.build.outputs.version }}`
-            - `${{ env.ECR_REGISTRY }}/${{ env.STACK_NAME }}/go-consumer:${{ needs.build.outputs.version }}`
+            | Image | Tag |
+            |-------|-----|
+            | go-api | `${{ env.ECR_REGISTRY }}/${{ env.ECR_REPO_PREFIX }}/go-api:${{ needs.build.outputs.version }}` |
+            | go-consumer | `${{ env.ECR_REGISTRY }}/${{ env.ECR_REPO_PREFIX }}/go-consumer:${{ needs.build.outputs.version }}` |
 
             ## Deployment
 
-            This release has been automatically deployed to the EC2 instance.
+            This release has been automatically deployed to production.
+
+            **Endpoints:**
+            - API: https://api.football.capibridge.com
+            - Grafana: https://grafana.football.capibridge.com
+            - Prometheus: https://prometheus.football.capibridge.com
 
             ## Changelog
 
-            See commit history for changes since the last release.
+            ${{ steps.changelog.outputs.content }}
           draft: false
-          prerelease: ${{ contains(needs.build.outputs.version, '-') }}
+          prerelease: ${{ contains(github.ref_name, '-') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

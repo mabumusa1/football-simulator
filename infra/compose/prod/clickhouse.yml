@@ -17,8 +17,6 @@ services:
 
     volumes:
       - clickhouse-data:/var/lib/clickhouse
-      - ../../clickhouse/config/config.xml:/etc/clickhouse-server/config.d/custom.xml:ro
-      - ../../clickhouse/init:/docker-entrypoint-initdb.d:ro
 
     deploy:
       replicas: 1

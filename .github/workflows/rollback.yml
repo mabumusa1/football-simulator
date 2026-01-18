@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to rollback to (e.g., v1.0.0)'
+        description: 'Version to rollback to (e.g., v1.0.0 or "latest")'
         required: true
         type: string
       confirm:
@@ -14,14 +14,15 @@ on:
 
 # Prevent concurrent rollbacks
 concurrency:
-  group: deployment
+  group: deploy-${{ github.ref }}
   cancel-in-progress: false
 
 env:
   AWS_REGION: ${{ vars.AWS_REGION }}
   AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
-  ECR_REGISTRY: ${{ vars.ECR_REGISTRY }}
-  STACK_NAME: ${{ vars.STACK_NAME }}
+  ECR_REGISTRY: ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com
+  ECR_REPO_PREFIX: football-dev
+  STACK_NAME: football-simulator
   EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
 
 jobs:
@@ -48,7 +49,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: validate
     if: needs.validate.outputs.proceed == 'true'
-    environment: demo
+    environment: production
 
     permissions:
       id-token: write
@@ -66,11 +67,11 @@ jobs:
         run: |
           VERSION="${{ github.event.inputs.version }}"
 
-          echo "Checking if images exist for version ${VERSION}..."
+          echo "🔍 Checking if images exist for version ${VERSION}..."
 
           # Check API image
           aws ecr describe-images \
-            --repository-name "${{ env.STACK_NAME }}/go-api" \
+            --repository-name "${{ env.ECR_REPO_PREFIX }}/go-api" \
             --image-ids imageTag="${VERSION}" \
             --region "${{ env.AWS_REGION }}" || {
               echo "::error::API image not found for version ${VERSION}"
@@ -79,39 +80,64 @@ jobs:
 
           # Check Consumer image
           aws ecr describe-images \
-            --repository-name "${{ env.STACK_NAME }}/go-consumer" \
+            --repository-name "${{ env.ECR_REPO_PREFIX }}/go-consumer" \
             --image-ids imageTag="${VERSION}" \
             --region "${{ env.AWS_REGION }}" || {
               echo "::error::Consumer image not found for version ${VERSION}"
               exit 1
             }
 
-          echo "::notice::Both images found for version ${VERSION}"
+          echo "✅ Both images found for version ${VERSION}"
+
+      - name: Get current version
+        id: current
+        run: |
+          INSTANCE_ID="${{ env.EC2_INSTANCE_ID }}"
+
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "${INSTANCE_ID}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters 'commands=["grep ^VERSION= /opt/football/app/.env | cut -d= -f2"]' \
+            --output text \
+            --query "Command.CommandId")
+
+          sleep 5
+
+          CURRENT_VERSION=$(aws ssm get-command-invocation \
+            --command-id "${COMMAND_ID}" \
+            --instance-id "${INSTANCE_ID}" \
+            --query "StandardOutputContent" \
+            --output text | tr -d '\n')
+
+          echo "version=${CURRENT_VERSION}" >> $GITHUB_OUTPUT
+          echo "📋 Current version: ${CURRENT_VERSION}"
 
       - name: Rollback via SSM
         id: rollback
         run: |
           VERSION="${{ github.event.inputs.version }}"
           INSTANCE_ID="${{ env.EC2_INSTANCE_ID }}"
+          ECR_REGISTRY="${{ env.ECR_REGISTRY }}"
+          ECR_REPO_PREFIX="${{ env.ECR_REPO_PREFIX }}"
 
-          echo "Rolling back to version ${VERSION} on instance ${INSTANCE_ID}..."
+          echo "🔙 Rolling back to version ${VERSION}..."
 
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids "${INSTANCE_ID}" \
             --document-name "AWS-RunShellScript" \
             --parameters commands="[
               \"cd /opt/football/app\",
-              \"echo 'Rolling back to version ${VERSION}...'\",
-              \"echo 'Updating VERSION in .env...'\",
+              \"echo '🔙 Rolling back to version ${VERSION}...'\",
+              \"echo '📦 Updating VERSION in .env...'\",
               \"sed -i 's/^VERSION=.*/VERSION=${VERSION}/' .env\",
-              \"echo 'Logging into ECR...'\",
-              \"aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}\",
-              \"echo 'Pulling rollback images...'\",
-              \"docker pull ${ECR_REGISTRY}/${STACK_NAME}/go-api:${VERSION}\",
-              \"docker pull ${ECR_REGISTRY}/${STACK_NAME}/go-consumer:${VERSION}\",
-              \"echo 'Deploying rollback version...'\",
+              \"echo '🔐 Logging into ECR...'\",
+              \"aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${ECR_REGISTRY}\",
+              \"echo '📥 Pulling rollback images...'\",
+              \"docker pull ${ECR_REGISTRY}/${ECR_REPO_PREFIX}/go-api:${VERSION}\",
+              \"docker pull ${ECR_REGISTRY}/${ECR_REPO_PREFIX}/go-consumer:${VERSION}\",
+              \"echo '🔄 Deploying rollback version...'\",
               \"./scripts/deploy.sh go-api go-consumer\",
-              \"echo 'Rollback deployment complete!'\",
+              \"echo '✅ Rollback deployment initiated'\",
               \"docker service ls\"
             ]" \
             --timeout-seconds 300 \
@@ -129,45 +155,63 @@ jobs:
           RESULT=$(aws ssm get-command-invocation \
             --command-id "${COMMAND_ID}" \
             --instance-id "${INSTANCE_ID}" \
-            --query "[Status, StatusDetails, StandardOutputContent, StandardErrorContent]" \
+            --query "[Status, StandardOutputContent, StandardErrorContent]" \
             --output json)
 
           STATUS=$(echo $RESULT | jq -r '.[0]')
-          STDOUT=$(echo $RESULT | jq -r '.[2]')
-          STDERR=$(echo $RESULT | jq -r '.[3]')
+          STDOUT=$(echo $RESULT | jq -r '.[1]')
+          STDERR=$(echo $RESULT | jq -r '.[2]')
 
           echo "Status: ${STATUS}"
+          echo "${STDOUT}"
 
-          if [[ "${STATUS}" == "Success" ]]; then
-            echo "::notice::Rollback to version ${VERSION} completed successfully"
-          else
-            echo "STDOUT: ${STDOUT}"
+          if [[ "${STATUS}" != "Success" ]]; then
             echo "STDERR: ${STDERR}"
-            echo "::error::Rollback failed!"
+            echo "::error::Rollback command failed!"
             exit 1
           fi
 
       - name: Verify rollback health
+        id: health-check
         run: |
-          echo "Verifying rollback health..."
+          echo "🏥 Verifying rollback health..."
           INSTANCE_ID="${{ env.EC2_INSTANCE_ID }}"
 
+          # Health check that works with Docker Swarm overlay networks
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids "${INSTANCE_ID}" \
             --document-name "AWS-RunShellScript" \
-            --parameters commands="[
-              \"for i in {1..30}; do\",
-              \"  STATUS=\\$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/health || echo '000')\",
-              \"  if [ \\\"\\$STATUS\\\" = '200' ]; then\",
-              \"    echo 'Health check passed!'\",
-              \"    exit 0\",
-              \"  fi\",
-              \"  echo \\\"Attempt \\$i: Status \\$STATUS, retrying...\\\"\",
-              \"  sleep 10\",
-              \"done\",
-              \"echo 'Health check failed'\",
-              \"exit 1\"
-            ]" \
+            --parameters 'commands=[
+              "echo \"Waiting for services to be ready...\"",
+              "sleep 30",
+              "for i in {1..30}; do",
+              "  echo \"Health check attempt $i/30\"",
+              "  ",
+              "  # Check if go-api replicas are running",
+              "  API_REPLICAS=$(docker service ls --filter name=football-simulator_go-api --format \"{{.Replicas}}\" | cut -d/ -f1)",
+              "  ",
+              "  if [[ \"$API_REPLICAS\" -ge 1 ]]; then",
+              "    # Check health via container exec",
+              "    CONTAINER_ID=$(docker ps --filter \"name=go-api\" --format \"{{.ID}}\" | head -1)",
+              "    if [ -n \"$CONTAINER_ID\" ]; then",
+              "      HEALTH=$(docker exec $CONTAINER_ID wget -qO- http://localhost:8080/health 2>/dev/null || echo \"\")",
+              "      if echo \"$HEALTH\" | grep -q healthy; then",
+              "        echo \"✅ Health check passed!\"",
+              "        echo \"Response: $HEALTH\"",
+              "        docker service ls",
+              "        exit 0",
+              "      fi",
+              "    fi",
+              "  fi",
+              "  ",
+              "  echo \"Waiting... (API: $API_REPLICAS replicas)\"",
+              "  sleep 10",
+              "done",
+              "echo \"❌ Health check failed after 30 attempts\"",
+              "docker service ls",
+              "docker service ps football-simulator_go-api --no-trunc | head -10",
+              "exit 1"
+            ]' \
             --timeout-seconds 600 \
             --output text \
             --query "Command.CommandId")
@@ -176,24 +220,36 @@ jobs:
             --command-id "${COMMAND_ID}" \
             --instance-id "${INSTANCE_ID}" || true
 
-          STATUS=$(aws ssm get-command-invocation \
+          RESULT=$(aws ssm get-command-invocation \
             --command-id "${COMMAND_ID}" \
             --instance-id "${INSTANCE_ID}" \
-            --query "Status" \
-            --output text)
+            --query "[Status, StandardOutputContent]" \
+            --output json)
+
+          STATUS=$(echo $RESULT | jq -r '.[0]')
+          STDOUT=$(echo $RESULT | jq -r '.[1]')
+
+          echo "${STDOUT}"
 
           if [[ "${STATUS}" != "Success" ]]; then
             echo "::error::Health check failed after rollback!"
             exit 1
           fi
 
-          echo "::notice::Rollback health check passed!"
+          echo "::notice::✅ Rollback health check passed!"
 
       - name: Rollback summary
+        if: always()
         run: |
           echo "## 🔄 Rollback Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Rolled back to:** \`${{ github.event.inputs.version }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Instance:** \`${{ env.EC2_INSTANCE_ID }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Initiated by:** @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Status:** ✅ Success" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Target Version | \`${{ github.event.inputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Previous Version | \`${{ steps.current.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Instance | \`${{ env.EC2_INSTANCE_ID }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Initiated by | @${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | ✅ Success |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Endpoints" >> $GITHUB_STEP_SUMMARY
+          echo "- API: https://api.football.capibridge.com/health" >> $GITHUB_STEP_SUMMARY
