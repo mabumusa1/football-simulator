@@ -1,0 +1,41 @@
+apiVersion: 1
+
+# =============================================================================
+# Grafana Datasources Provisioning
+# =============================================================================
+# These datasources are automatically configured when Grafana starts.
+# No manual configuration required.
+#
+# Documentation: https://grafana.com/docs/grafana/latest/administration/provisioning/
+# =============================================================================
+
+datasources:
+  # ---------------------------------------------------------------------------
+  # Prometheus - Primary metrics store
+  # ---------------------------------------------------------------------------
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: "15s"
+      httpMethod: POST
+
+  # ---------------------------------------------------------------------------
+  # ClickHouse - Analytics database (requires grafana-clickhouse-datasource plugin)
+  # ---------------------------------------------------------------------------
+  - name: ClickHouse
+    type: grafana-clickhouse-datasource
+    access: proxy
+    url: http://clickhouse:8123
+    editable: false
+    jsonData:
+      defaultDatabase: football_simulator
+      port: 9000
+      server: clickhouse
+      username: default
+      tlsSkipVerify: false
+    secureJsonData:
+      password: ${CLICKHOUSE_PASSWORD}

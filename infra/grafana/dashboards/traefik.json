@@ -1,0 +1,398 @@
+{
+  "dashboard": {
+    "title": "Traefik Load Balancer",
+    "uid": "traefik-lb",
+    "tags": ["traefik", "load-balancer", "infrastructure"],
+    "timezone": "browser",
+    "refresh": "10s",
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "Overview",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0}
+      },
+      {
+        "id": 2,
+        "title": "Total Requests",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 4, "x": 0, "y": 1},
+        "targets": [
+          {
+            "expr": "sum(traefik_entrypoint_requests_total)",
+            "legendFormat": "Requests"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "color": {"mode": "thresholds"},
+            "thresholds": {
+              "steps": [{"color": "blue", "value": null}]
+            }
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "Request Rate",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 4, "x": 4, "y": 1},
+        "targets": [
+          {
+            "expr": "sum(rate(traefik_entrypoint_requests_total[1m]))",
+            "legendFormat": "req/s"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "reqps",
+            "color": {"mode": "thresholds"},
+            "thresholds": {
+              "steps": [{"color": "green", "value": null}]
+            }
+          }
+        }
+      },
+      {
+        "id": 4,
+        "title": "Open Connections",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 4, "x": 8, "y": 1},
+        "targets": [
+          {
+            "expr": "sum(traefik_open_connections)",
+            "legendFormat": "Connections"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 100},
+                {"color": "red", "value": 500}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 5,
+        "title": "Config Reloads",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 4, "x": 12, "y": 1},
+        "targets": [
+          {
+            "expr": "traefik_config_reloads_total",
+            "legendFormat": "Reloads"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short"
+          }
+        }
+      },
+      {
+        "id": 6,
+        "title": "Last Config Reload",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 4, "x": 16, "y": 1},
+        "targets": [
+          {
+            "expr": "traefik_config_last_reload_success",
+            "legendFormat": "Success"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {"type": "value", "options": {"0": {"text": "FAILED", "color": "red"}}},
+              {"type": "value", "options": {"1": {"text": "SUCCESS", "color": "green"}}}
+            ]
+          }
+        }
+      },
+      {
+        "id": 7,
+        "title": "TLS Requests",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 4, "x": 20, "y": 1},
+        "targets": [
+          {
+            "expr": "sum(traefik_entrypoint_requests_tls_total)",
+            "legendFormat": "TLS Requests"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "color": {"mode": "thresholds"},
+            "thresholds": {
+              "steps": [{"color": "purple", "value": null}]
+            }
+          }
+        }
+      },
+      {
+        "id": 8,
+        "title": "Entrypoints",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 5}
+      },
+      {
+        "id": 9,
+        "title": "Requests by Entrypoint",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6},
+        "targets": [
+          {
+            "expr": "sum(rate(traefik_entrypoint_requests_total[1m])) by (entrypoint)",
+            "legendFormat": "{{entrypoint}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "reqps",
+            "custom": {
+              "fillOpacity": 20
+            }
+          }
+        }
+      },
+      {
+        "id": 10,
+        "title": "Response Time by Entrypoint (p95)",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 6},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(traefik_entrypoint_request_duration_seconds_bucket[1m])) by (le, entrypoint))",
+            "legendFormat": "{{entrypoint}} p95"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 0.2},
+                {"color": "red", "value": 0.5}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 11,
+        "title": "Routers",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 14}
+      },
+      {
+        "id": 12,
+        "title": "Requests by Router",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 15},
+        "targets": [
+          {
+            "expr": "sum(rate(traefik_router_requests_total[1m])) by (router)",
+            "legendFormat": "{{router}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "reqps",
+            "custom": {
+              "fillOpacity": 20
+            }
+          }
+        }
+      },
+      {
+        "id": 13,
+        "title": "Response Time by Router (p95)",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 15},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(traefik_router_request_duration_seconds_bucket[1m])) by (le, router))",
+            "legendFormat": "{{router}} p95"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s"
+          }
+        }
+      },
+      {
+        "id": 14,
+        "title": "Services",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 23}
+      },
+      {
+        "id": 15,
+        "title": "Requests by Service",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24},
+        "targets": [
+          {
+            "expr": "sum(rate(traefik_service_requests_total[1m])) by (service)",
+            "legendFormat": "{{service}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "reqps",
+            "custom": {
+              "fillOpacity": 20
+            }
+          }
+        }
+      },
+      {
+        "id": 16,
+        "title": "Response Time by Service (p95)",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(traefik_service_request_duration_seconds_bucket[1m])) by (le, service))",
+            "legendFormat": "{{service}} p95"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s"
+          }
+        }
+      },
+      {
+        "id": 17,
+        "title": "Service Health",
+        "type": "stat",
+        "gridPos": {"h": 8, "w": 8, "x": 0, "y": 32},
+        "targets": [
+          {
+            "expr": "traefik_service_server_up",
+            "legendFormat": "{{service}} - {{url}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {"type": "value", "options": {"0": {"text": "DOWN", "color": "red"}}},
+              {"type": "value", "options": {"1": {"text": "UP", "color": "green"}}}
+            ]
+          }
+        },
+        "options": {
+          "reduceOptions": {
+            "calcs": ["lastNotNull"]
+          },
+          "textMode": "value_and_name"
+        }
+      },
+      {
+        "id": 18,
+        "title": "Bandwidth",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 40}
+      },
+      {
+        "id": 19,
+        "title": "Bytes In (Requests)",
+        "type": "timeseries",
+        "gridPos": {"h": 6, "w": 12, "x": 0, "y": 41},
+        "targets": [
+          {
+            "expr": "sum(rate(traefik_service_requests_bytes_total[1m])) by (service)",
+            "legendFormat": "{{service}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "Bps",
+            "custom": {
+              "fillOpacity": 20
+            }
+          }
+        }
+      },
+      {
+        "id": 20,
+        "title": "Bytes Out (Responses)",
+        "type": "timeseries",
+        "gridPos": {"h": 6, "w": 12, "x": 12, "y": 41},
+        "targets": [
+          {
+            "expr": "sum(rate(traefik_service_responses_bytes_total[1m])) by (service)",
+            "legendFormat": "{{service}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "Bps",
+            "custom": {
+              "fillOpacity": 20
+            }
+          }
+        }
+      },
+      {
+        "id": 21,
+        "title": "TLS Certificates",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 47}
+      },
+      {
+        "id": 22,
+        "title": "Certificate Expiry (Days)",
+        "type": "table",
+        "gridPos": {"h": 6, "w": 24, "x": 0, "y": 48},
+        "targets": [
+          {
+            "expr": "(traefik_tls_certs_not_after - time()) / 86400",
+            "legendFormat": "{{cn}} ({{sans}})",
+            "format": "table",
+            "instant": true
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "d",
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": null},
+                {"color": "yellow", "value": 14},
+                {"color": "green", "value": 30}
+              ]
+            },
+            "custom": {
+              "displayMode": "color-background"
+            }
+          }
+        },
+        "transformations": [
+          {
+            "id": "organize",
+            "options": {
+              "excludeByName": {"Time": true},
+              "renameByName": {"Value": "Days Until Expiry"}
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "overwrite": true
+}

@@ -17,6 +17,8 @@ services:
 
     volumes:
       - clickhouse-data:/var/lib/clickhouse
+      - /opt/football/app/infra/clickhouse/init:/docker-entrypoint-initdb.d:ro
+      - /opt/football/app/infra/clickhouse/config/prometheus.xml:/etc/clickhouse-server/config.d/prometheus.xml:ro
 
     deploy:
       replicas: 1

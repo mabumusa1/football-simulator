@@ -1,0 +1,306 @@
+{
+  "dashboard": {
+    "title": "Kafka Producer",
+    "uid": "kafka-producer",
+    "tags": ["kafka", "messaging", "infrastructure"],
+    "timezone": "browser",
+    "refresh": "10s",
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "Overview",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0}
+      },
+      {
+        "id": 2,
+        "title": "Total Messages Produced",
+        "type": "stat",
+        "gridPos": {"h": 5, "w": 6, "x": 0, "y": 1},
+        "targets": [
+          {
+            "expr": "sum(football_simulator_kafka_producer_messages_produced_total)",
+            "legendFormat": "Messages"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "color": {"mode": "thresholds"},
+            "thresholds": {
+              "steps": [{"color": "blue", "value": null}]
+            }
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "Messages/sec",
+        "type": "stat",
+        "gridPos": {"h": 5, "w": 6, "x": 6, "y": 1},
+        "targets": [
+          {
+            "expr": "sum(rate(football_simulator_kafka_producer_messages_produced_total[1m]))",
+            "legendFormat": "msg/s"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "color": {"mode": "thresholds"},
+            "thresholds": {
+              "steps": [{"color": "green", "value": null}]
+            }
+          }
+        }
+      },
+      {
+        "id": 4,
+        "title": "Producer Errors",
+        "type": "stat",
+        "gridPos": {"h": 5, "w": 6, "x": 12, "y": 1},
+        "targets": [
+          {
+            "expr": "sum(kafka_produce_errors_total) or vector(0)",
+            "legendFormat": "Errors"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "red", "value": 1}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 5,
+        "title": "Avg Message Size",
+        "type": "stat",
+        "gridPos": {"h": 5, "w": 6, "x": 18, "y": 1},
+        "targets": [
+          {
+            "expr": "sum(rate(football_simulator_kafka_producer_message_size_bytes_sum[5m])) / sum(rate(football_simulator_kafka_producer_message_size_bytes_count[5m]))",
+            "legendFormat": "Avg Size"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "bytes",
+            "thresholds": {
+              "steps": [{"color": "purple", "value": null}]
+            }
+          }
+        }
+      },
+      {
+        "id": 6,
+        "title": "Throughput",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 6}
+      },
+      {
+        "id": 7,
+        "title": "Message Production Rate",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 7},
+        "targets": [
+          {
+            "expr": "sum(rate(football_simulator_kafka_producer_messages_produced_total[1m])) by (instance)",
+            "legendFormat": "{{instance}}"
+          },
+          {
+            "expr": "sum(rate(football_simulator_kafka_producer_messages_produced_total[1m]))",
+            "legendFormat": "Total"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "custom": {
+              "fillOpacity": 20
+            }
+          }
+        }
+      },
+      {
+        "id": 8,
+        "title": "Bytes Produced Rate",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 7},
+        "targets": [
+          {
+            "expr": "sum(rate(football_simulator_kafka_producer_message_size_bytes_sum[1m]))",
+            "legendFormat": "Bytes/sec"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "Bps",
+            "custom": {
+              "fillOpacity": 20
+            }
+          }
+        }
+      },
+      {
+        "id": 9,
+        "title": "Latency",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 15}
+      },
+      {
+        "id": 10,
+        "title": "Producer Latency Percentiles",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, sum(rate(football_simulator_kafka_producer_produce_duration_seconds_bucket[1m])) by (le))",
+            "legendFormat": "p50"
+          },
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(football_simulator_kafka_producer_produce_duration_seconds_bucket[1m])) by (le))",
+            "legendFormat": "p95"
+          },
+          {
+            "expr": "histogram_quantile(0.99, sum(rate(football_simulator_kafka_producer_produce_duration_seconds_bucket[1m])) by (le))",
+            "legendFormat": "p99"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 0.1},
+                {"color": "red", "value": 0.5}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 11,
+        "title": "Avg Producer Latency",
+        "type": "gauge",
+        "gridPos": {"h": 8, "w": 6, "x": 12, "y": 16},
+        "targets": [
+          {
+            "expr": "sum(rate(football_simulator_kafka_producer_produce_duration_seconds_sum[5m])) / sum(rate(football_simulator_kafka_producer_produce_duration_seconds_count[5m]))",
+            "legendFormat": "Avg Latency"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "min": 0,
+            "max": 0.5,
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 0.05},
+                {"color": "red", "value": 0.1}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 12,
+        "title": "Error Rate",
+        "type": "gauge",
+        "gridPos": {"h": 8, "w": 6, "x": 18, "y": 16},
+        "targets": [
+          {
+            "expr": "sum(rate(kafka_produce_errors_total[5m])) / sum(rate(football_simulator_kafka_producer_messages_produced_total[5m])) * 100 or vector(0)",
+            "legendFormat": "Error %"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 0.1},
+                {"color": "red", "value": 1}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 13,
+        "title": "Message Size Distribution",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 24}
+      },
+      {
+        "id": 14,
+        "title": "Message Size Histogram",
+        "type": "heatmap",
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 25},
+        "targets": [
+          {
+            "expr": "sum(increase(football_simulator_kafka_producer_message_size_bytes_bucket[1m])) by (le)",
+            "legendFormat": "{{le}}",
+            "format": "heatmap"
+          }
+        ],
+        "options": {
+          "calculate": false,
+          "yAxis": {
+            "unit": "bytes"
+          }
+        }
+      },
+      {
+        "id": 15,
+        "title": "Events vs Engagements to Kafka",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 33}
+      },
+      {
+        "id": 16,
+        "title": "Data Flow to Kafka",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 34},
+        "targets": [
+          {
+            "expr": "sum(rate(events_ingested_total[1m]))",
+            "legendFormat": "Events Ingested"
+          },
+          {
+            "expr": "sum(rate(engagements_ingested_total[1m]))",
+            "legendFormat": "Engagements Ingested"
+          },
+          {
+            "expr": "sum(rate(football_simulator_kafka_producer_messages_produced_total[1m]))",
+            "legendFormat": "Kafka Messages"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "custom": {
+              "fillOpacity": 10
+            }
+          }
+        }
+      }
+    ]
+  },
+  "overwrite": true
+}

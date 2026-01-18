@@ -1,0 +1,396 @@
+{
+  "dashboard": {
+    "title": "System Overview",
+    "uid": "system-overview",
+    "tags": ["overview", "football", "infrastructure"],
+    "timezone": "browser",
+    "refresh": "10s",
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "System Health",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0}
+      },
+      {
+        "id": 2,
+        "title": "API Status",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 4, "x": 0, "y": 1},
+        "targets": [
+          {
+            "expr": "up{job=\"go-api\"}",
+            "legendFormat": "{{instance}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {"type": "value", "options": {"0": {"text": "DOWN", "color": "red"}}},
+              {"type": "value", "options": {"1": {"text": "UP", "color": "green"}}}
+            ],
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": null},
+                {"color": "green", "value": 1}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "Consumer Status",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 4, "x": 4, "y": 1},
+        "targets": [
+          {
+            "expr": "up{job=\"go-consumer\"}",
+            "legendFormat": "{{instance}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {"type": "value", "options": {"0": {"text": "DOWN", "color": "red"}}},
+              {"type": "value", "options": {"1": {"text": "UP", "color": "green"}}}
+            ],
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": null},
+                {"color": "green", "value": 1}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 4,
+        "title": "Traefik Status",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 4, "x": 8, "y": 1},
+        "targets": [
+          {
+            "expr": "up{job=\"traefik\"}",
+            "legendFormat": "Traefik"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {"type": "value", "options": {"0": {"text": "DOWN", "color": "red"}}},
+              {"type": "value", "options": {"1": {"text": "UP", "color": "green"}}}
+            ],
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": null},
+                {"color": "green", "value": 1}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 5,
+        "title": "ClickHouse Status",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 4, "x": 12, "y": 1},
+        "targets": [
+          {
+            "expr": "up{job=\"clickhouse\"}",
+            "legendFormat": "ClickHouse"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {"type": "value", "options": {"0": {"text": "DOWN", "color": "red"}}},
+              {"type": "value", "options": {"1": {"text": "UP", "color": "green"}}}
+            ],
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": null},
+                {"color": "green", "value": 1}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 6,
+        "title": "Prometheus Status",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 4, "x": 16, "y": 1},
+        "targets": [
+          {
+            "expr": "up{job=\"prometheus\"}",
+            "legendFormat": "Prometheus"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {"type": "value", "options": {"0": {"text": "DOWN", "color": "red"}}},
+              {"type": "value", "options": {"1": {"text": "UP", "color": "green"}}}
+            ],
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": null},
+                {"color": "green", "value": 1}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 7,
+        "title": "Total Errors",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 4, "x": 20, "y": 1},
+        "targets": [
+          {
+            "expr": "sum(kafka_produce_errors_total) + sum(clickhouse_query_errors_total) + sum(http_requests_total{status=~\"5..\"}) or vector(0)",
+            "legendFormat": "Errors"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 1},
+                {"color": "red", "value": 10}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 8,
+        "title": "Traffic & Throughput",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 5}
+      },
+      {
+        "id": 9,
+        "title": "Traefik - Requests/sec by Service",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6},
+        "targets": [
+          {
+            "expr": "sum(rate(traefik_service_requests_total[1m])) by (service)",
+            "legendFormat": "{{service}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "reqps",
+            "custom": {
+              "fillOpacity": 20
+            }
+          }
+        }
+      },
+      {
+        "id": 10,
+        "title": "API - Requests/sec by Endpoint",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 6},
+        "targets": [
+          {
+            "expr": "sum(rate(http_requests_total{path=~\"/api/.*\"}[1m])) by (path)",
+            "legendFormat": "{{path}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "reqps",
+            "custom": {
+              "fillOpacity": 20
+            }
+          }
+        }
+      },
+      {
+        "id": 11,
+        "title": "Kafka - Messages Produced/sec",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 14},
+        "targets": [
+          {
+            "expr": "sum(rate(football_simulator_kafka_producer_messages_produced_total[1m]))",
+            "legendFormat": "Messages/sec"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "custom": {
+              "fillOpacity": 20
+            }
+          }
+        }
+      },
+      {
+        "id": 12,
+        "title": "Data Ingested",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 14},
+        "targets": [
+          {
+            "expr": "sum(rate(events_ingested_total[1m]))",
+            "legendFormat": "Events/sec"
+          },
+          {
+            "expr": "sum(rate(engagements_ingested_total[1m]))",
+            "legendFormat": "Engagements/sec"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "custom": {
+              "fillOpacity": 20
+            }
+          }
+        }
+      },
+      {
+        "id": 13,
+        "title": "Latency",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 22}
+      },
+      {
+        "id": 14,
+        "title": "Traefik - Response Time p95 by Service",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 23},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(traefik_service_request_duration_seconds_bucket[1m])) by (le, service))",
+            "legendFormat": "{{service}} p95"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 0.2},
+                {"color": "red", "value": 0.5}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 15,
+        "title": "API - Response Time p95 by Endpoint",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 23},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{path=~\"/api/.*\"}[1m])) by (le, path))",
+            "legendFormat": "{{path}} p95"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 0.2},
+                {"color": "red", "value": 0.5}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 16,
+        "title": "Connections & Resources",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 31}
+      },
+      {
+        "id": 17,
+        "title": "Traefik - Open Connections",
+        "type": "timeseries",
+        "gridPos": {"h": 6, "w": 8, "x": 0, "y": 32},
+        "targets": [
+          {
+            "expr": "sum(traefik_open_connections) by (entrypoint)",
+            "legendFormat": "{{entrypoint}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short"
+          }
+        }
+      },
+      {
+        "id": 18,
+        "title": "Traefik - Backend Health",
+        "type": "stat",
+        "gridPos": {"h": 6, "w": 8, "x": 8, "y": 32},
+        "targets": [
+          {
+            "expr": "traefik_service_server_up",
+            "legendFormat": "{{service}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {"type": "value", "options": {"0": {"text": "DOWN", "color": "red"}}},
+              {"type": "value", "options": {"1": {"text": "UP", "color": "green"}}}
+            ]
+          }
+        },
+        "options": {
+          "reduceOptions": {
+            "calcs": ["lastNotNull"]
+          }
+        }
+      },
+      {
+        "id": 19,
+        "title": "TLS Cert Expiry",
+        "type": "stat",
+        "gridPos": {"h": 6, "w": 8, "x": 16, "y": 32},
+        "targets": [
+          {
+            "expr": "(traefik_tls_certs_not_after - time()) / 86400",
+            "legendFormat": "{{sans}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "d",
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": null},
+                {"color": "yellow", "value": 14},
+                {"color": "green", "value": 30}
+              ]
+            }
+          }
+        },
+        "options": {
+          "reduceOptions": {
+            "calcs": ["lastNotNull"]
+          }
+        }
+      }
+    ]
+  },
+  "overwrite": true
+}

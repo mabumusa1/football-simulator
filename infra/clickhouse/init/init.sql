@@ -381,3 +381,4 @@ SELECT
 FROM football_simulator.engagement_events
 GROUP BY match_id, game_minute
 ORDER BY match_id, game_minute;
+
