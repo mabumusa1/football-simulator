@@ -16,7 +16,7 @@ services:
       - "--web.external-url=https://prometheus.${DOMAIN}"
 
     volumes:
-      - ../../prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - /opt/football/app/infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
 
     deploy:
@@ -41,7 +41,7 @@ services:
   # GRAFANA
   # ---------------------------------------------------------------------------
   grafana:
-    image: grafana/grafana:12.4.0
+    image: grafana/grafana:11.4.0
 
     networks:
       - traefik-public
@@ -58,8 +58,8 @@ services:
 
     volumes:
       - grafana-data:/var/lib/grafana
-      - ../../grafana/dashboards:/var/lib/grafana/dashboards:ro
-      - ../../grafana/provisioning:/etc/grafana/provisioning:ro
+      - /opt/football/app/infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - /opt/football/app/infra/grafana/provisioning:/etc/grafana/provisioning:ro
 
     deploy:
       replicas: 1

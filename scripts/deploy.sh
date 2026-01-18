@@ -111,6 +111,9 @@ build_compose_command() {
     local services=("$@")
     local cmd="docker compose"
 
+    # Include env file
+    cmd="$cmd --env-file $PROJECT_DIR/.env"
+
     # Always include base
     cmd="$cmd -f $PROJECT_DIR/infra/compose/base.yml"
 
@@ -163,7 +166,10 @@ deploy_stack() {
     local cmd=$(build_compose_command "${services[@]}")
 
     # Deploy using docker stack (reads from merged config)
-    $cmd config | docker stack deploy -c - "$STACK_NAME"
+    # Fixes for docker compose v5 -> docker stack compatibility:
+    # 1. Convert published port strings to integers
+    # 2. Remove 'name:' property not supported by docker stack
+    $cmd config | sed 's/published: "\([0-9]*\)"/published: \1/g' | sed '/^name:/d' | docker stack deploy -c - "$STACK_NAME"
 
     echo ""
     echo -e "${GREEN}Deployment initiated!${NC}"
