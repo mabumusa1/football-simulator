@@ -1,278 +1,275 @@
 {
-  "dashboard": {
-    "title": "Football API Performance",
-    "uid": "football-api-perf",
-    "tags": ["football", "api", "load-testing"],
-    "timezone": "browser",
-    "refresh": "5s",
-    "time": {
-      "from": "now-1h",
-      "to": "now"
-    },
-    "panels": [
-      {
-        "id": 1,
-        "title": "Request Rate (req/s)",
-        "type": "timeseries",
-        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
-        "targets": [
-          {
-            "expr": "sum(rate(http_requests_total{path=~\"/api/.*\"}[1m])) by (path)",
-            "legendFormat": "{{path}}"
-          }
-        ],
-        "fieldConfig": {
-          "defaults": {
-            "unit": "reqps",
-            "custom": {
-              "drawStyle": "line",
-              "lineWidth": 2,
-              "fillOpacity": 10
-            }
-          }
+  "title": "Football API Performance",
+  "uid": "football-api-perf",
+  "tags": ["football", "api", "load-testing"],
+  "timezone": "browser",
+  "refresh": "5s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Request Rate (req/s)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total{path=~\"/api/.*\"}[1m])) by (path)",
+          "legendFormat": "{{path}}"
         }
-      },
-      {
-        "id": 2,
-        "title": "Response Time (p95)",
-        "type": "timeseries",
-        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
-        "targets": [
-          {
-            "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{path=~\"/api/.*\"}[1m])) by (le, path))",
-            "legendFormat": "{{path}} p95"
-          },
-          {
-            "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{path=~\"/api/.*\"}[1m])) by (le, path))",
-            "legendFormat": "{{path}} p50"
-          }
-        ],
-        "fieldConfig": {
-          "defaults": {
-            "unit": "s",
-            "thresholds": {
-              "steps": [
-                {"color": "green", "value": null},
-                {"color": "yellow", "value": 0.2},
-                {"color": "red", "value": 0.5}
-              ]
-            }
-          }
-        }
-      },
-      {
-        "id": 3,
-        "title": "Total Events Ingested",
-        "type": "stat",
-        "gridPos": {"h": 4, "w": 6, "x": 0, "y": 8},
-        "targets": [
-          {
-            "expr": "sum(events_ingested_total)",
-            "legendFormat": "Events"
-          }
-        ],
-        "fieldConfig": {
-          "defaults": {
-            "unit": "short",
-            "color": {"mode": "thresholds"},
-            "thresholds": {
-              "steps": [
-                {"color": "blue", "value": null}
-              ]
-            }
-          }
-        }
-      },
-      {
-        "id": 4,
-        "title": "Total Engagements Ingested",
-        "type": "stat",
-        "gridPos": {"h": 4, "w": 6, "x": 6, "y": 8},
-        "targets": [
-          {
-            "expr": "sum(engagements_ingested_total)",
-            "legendFormat": "Engagements"
-          }
-        ],
-        "fieldConfig": {
-          "defaults": {
-            "unit": "short",
-            "color": {"mode": "thresholds"},
-            "thresholds": {
-              "steps": [
-                {"color": "purple", "value": null}
-              ]
-            }
-          }
-        }
-      },
-      {
-        "id": 5,
-        "title": "HTTP Errors",
-        "type": "stat",
-        "gridPos": {"h": 4, "w": 6, "x": 12, "y": 8},
-        "targets": [
-          {
-            "expr": "sum(http_requests_total{status=~\"4..|5..\"}) or vector(0)",
-            "legendFormat": "Errors"
-          }
-        ],
-        "fieldConfig": {
-          "defaults": {
-            "thresholds": {
-              "steps": [
-                {"color": "green", "value": null},
-                {"color": "yellow", "value": 1},
-                {"color": "red", "value": 10}
-              ]
-            }
-          }
-        }
-      },
-      {
-        "id": 6,
-        "title": "Kafka Errors",
-        "type": "stat",
-        "gridPos": {"h": 4, "w": 6, "x": 18, "y": 8},
-        "targets": [
-          {
-            "expr": "sum(kafka_produce_errors_total) or vector(0)",
-            "legendFormat": "Kafka Errors"
-          }
-        ],
-        "fieldConfig": {
-          "defaults": {
-            "thresholds": {
-              "steps": [
-                {"color": "green", "value": null},
-                {"color": "red", "value": 1}
-              ]
-            }
-          }
-        }
-      },
-      {
-        "id": 7,
-        "title": "Events by Type",
-        "type": "piechart",
-        "gridPos": {"h": 8, "w": 8, "x": 0, "y": 12},
-        "targets": [
-          {
-            "expr": "sum(events_ingested_total) by (event_type)",
-            "legendFormat": "{{event_type}}"
-          }
-        ],
-        "options": {
-          "legend": {
-            "displayMode": "table",
-            "placement": "right",
-            "values": ["value", "percent"]
-          }
-        }
-      },
-      {
-        "id": 8,
-        "title": "Engagements by Type",
-        "type": "piechart",
-        "gridPos": {"h": 8, "w": 8, "x": 8, "y": 12},
-        "targets": [
-          {
-            "expr": "sum(engagements_ingested_total) by (engagement_type)",
-            "legendFormat": "{{engagement_type}}"
-          }
-        ],
-        "options": {
-          "legend": {
-            "displayMode": "table",
-            "placement": "right",
-            "values": ["value", "percent"]
-          }
-        }
-      },
-      {
-        "id": 9,
-        "title": "Load per Instance",
-        "type": "timeseries",
-        "gridPos": {"h": 8, "w": 8, "x": 16, "y": 12},
-        "targets": [
-          {
-            "expr": "sum(rate(http_requests_total[1m])) by (instance)",
-            "legendFormat": "{{instance}}"
-          }
-        ],
-        "fieldConfig": {
-          "defaults": {
-            "unit": "reqps"
-          }
-        }
-      },
-      {
-        "id": 10,
-        "title": "Engagement Ingest Rate",
-        "type": "timeseries",
-        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 20},
-        "targets": [
-          {
-            "expr": "sum(rate(engagements_ingested_total[1m]))",
-            "legendFormat": "Engagements/s"
-          }
-        ],
-        "fieldConfig": {
-          "defaults": {
-            "unit": "short",
-            "custom": {
-              "fillOpacity": 20
-            }
-          }
-        }
-      },
-      {
-        "id": 11,
-        "title": "Events Ingest Rate",
-        "type": "timeseries",
-        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 20},
-        "targets": [
-          {
-            "expr": "sum(rate(events_ingested_total[1m]))",
-            "legendFormat": "Events/s"
-          }
-        ],
-        "fieldConfig": {
-          "defaults": {
-            "unit": "short",
-            "custom": {
-              "fillOpacity": 20
-            }
-          }
-        }
-      },
-      {
-        "id": 12,
-        "title": "Avg Response Time by Endpoint",
-        "type": "gauge",
-        "gridPos": {"h": 6, "w": 24, "x": 0, "y": 28},
-        "targets": [
-          {
-            "expr": "rate(http_request_duration_seconds_sum{path=~\"/api/.*\"}[5m]) / rate(http_request_duration_seconds_count{path=~\"/api/.*\"}[5m])",
-            "legendFormat": "{{path}}"
-          }
-        ],
-        "fieldConfig": {
-          "defaults": {
-            "unit": "s",
-            "min": 0,
-            "max": 1,
-            "thresholds": {
-              "steps": [
-                {"color": "green", "value": null},
-                {"color": "yellow", "value": 0.2},
-                {"color": "red", "value": 0.5}
-              ]
-            }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10
           }
         }
       }
-    ]
-  },
-  "overwrite": true
+    },
+    {
+      "id": 2,
+      "title": "Response Time (p95)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{path=~\"/api/.*\"}[1m])) by (le, path))",
+          "legendFormat": "{{path}} p95"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{path=~\"/api/.*\"}[1m])) by (le, path))",
+          "legendFormat": "{{path}} p50"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 0.2},
+              {"color": "red", "value": 0.5}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Total Events Ingested",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 8},
+      "targets": [
+        {
+          "expr": "sum(events_ingested_total)",
+          "legendFormat": "Events"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "steps": [
+              {"color": "blue", "value": null}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Total Engagements Ingested",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 8},
+      "targets": [
+        {
+          "expr": "sum(engagements_ingested_total)",
+          "legendFormat": "Engagements"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "steps": [
+              {"color": "purple", "value": null}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "HTTP Errors",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 8},
+      "targets": [
+        {
+          "expr": "sum(http_requests_total{status=~\"4..|5..\"}) or vector(0)",
+          "legendFormat": "Errors"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 1},
+              {"color": "red", "value": 10}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Kafka Errors",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 8},
+      "targets": [
+        {
+          "expr": "sum(kafka_produce_errors_total) or vector(0)",
+          "legendFormat": "Kafka Errors"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "red", "value": 1}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 7,
+      "title": "Events by Type",
+      "type": "piechart",
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 12},
+      "targets": [
+        {
+          "expr": "sum(events_ingested_total) by (event_type)",
+          "legendFormat": "{{event_type}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "values": ["value", "percent"]
+        }
+      }
+    },
+    {
+      "id": 8,
+      "title": "Engagements by Type",
+      "type": "piechart",
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 12},
+      "targets": [
+        {
+          "expr": "sum(engagements_ingested_total) by (engagement_type)",
+          "legendFormat": "{{engagement_type}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "values": ["value", "percent"]
+        }
+      }
+    },
+    {
+      "id": 9,
+      "title": "Load per Instance",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 12},
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total[1m])) by (instance)",
+          "legendFormat": "{{instance}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        }
+      }
+    },
+    {
+      "id": 10,
+      "title": "Engagement Ingest Rate",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 20},
+      "targets": [
+        {
+          "expr": "sum(rate(engagements_ingested_total[1m]))",
+          "legendFormat": "Engagements/s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 20
+          }
+        }
+      }
+    },
+    {
+      "id": 11,
+      "title": "Events Ingest Rate",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 20},
+      "targets": [
+        {
+          "expr": "sum(rate(events_ingested_total[1m]))",
+          "legendFormat": "Events/s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 20
+          }
+        }
+      }
+    },
+    {
+      "id": 12,
+      "title": "Avg Response Time by Endpoint",
+      "type": "gauge",
+      "gridPos": {"h": 6, "w": 24, "x": 0, "y": 28},
+      "targets": [
+        {
+          "expr": "rate(http_request_duration_seconds_sum{path=~\"/api/.*\"}[5m]) / rate(http_request_duration_seconds_count{path=~\"/api/.*\"}[5m])",
+          "legendFormat": "{{path}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 0.2},
+              {"color": "red", "value": 0.5}
+            ]
+          }
+        }
+      }
+    }
+  ]
 }
