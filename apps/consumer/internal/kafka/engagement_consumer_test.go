@@ -31,16 +31,16 @@ func (m *mockEngagementRepository) InsertEngagementBatch(ctx context.Context, ev
 
 func createTestEngagementEvent() *domain.EngagementEvent {
 	return &domain.EngagementEvent{
-		EngagementID:   uuid.New(),
-		MatchID:        "test-match-" + uuid.New().String()[:8],
-		UserID:         "user-" + uuid.New().String()[:8],
-		SessionID:      "session-" + uuid.New().String()[:8],
-		EngagementType: domain.EngagementTypeReaction,
-		Subtype:        "cheer",
-		Timestamp:      time.Now(),
-		DeviceType:     "mobile",
-		Platform:       "ios",
-		CountryCode:    "US",
+		EventID:           uuid.New(),
+		MatchID:           "test-match-" + uuid.New().String()[:8],
+		UserID:            "user-" + uuid.New().String()[:8],
+		SessionID:         "session-" + uuid.New().String()[:8],
+		EngagementType:    domain.EngagementTypeReaction,
+		EngagementSubtype: "cheer",
+		Timestamp:         time.Now(),
+		DeviceType:        "mobile",
+		Platform:          "ios",
+		CountryCode:       "US",
 	}
 }
 
@@ -377,8 +377,8 @@ func TestEngagementEvent_FromKafkaMessage(t *testing.T) {
 		t.Fatalf("failed to parse event: %v", err)
 	}
 
-	if parsedEvent.EngagementID != event.EngagementID {
-		t.Errorf("expected EngagementID %s, got %s", event.EngagementID, parsedEvent.EngagementID)
+	if parsedEvent.EventID != event.EventID {
+		t.Errorf("expected EventID %s, got %s", event.EventID, parsedEvent.EventID)
 	}
 
 	if parsedEvent.MatchID != event.MatchID {
@@ -415,13 +415,13 @@ func TestEngagementEvent_AllEngagementTypes(t *testing.T) {
 	for _, engagementType := range engagementTypes {
 		t.Run(string(engagementType), func(t *testing.T) {
 			event := &domain.EngagementEvent{
-				EngagementID:   uuid.New(),
-				MatchID:        "match-123",
-				UserID:         "user-456",
-				SessionID:      "session-789",
-				EngagementType: engagementType,
-				Subtype:        "test",
-				Timestamp:      time.Now(),
+				EventID:           uuid.New(),
+				MatchID:           "match-123",
+				UserID:            "user-456",
+				SessionID:         "session-789",
+				EngagementType:    engagementType,
+				EngagementSubtype: "test",
+				Timestamp:         time.Now(),
 			}
 
 			value, err := event.ToKafkaMessage()

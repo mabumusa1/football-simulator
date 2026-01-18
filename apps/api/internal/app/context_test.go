@@ -248,7 +248,7 @@ func TestAppContext_Shutdown_ContextCanceled(t *testing.T) {
 // ShutdownChan Tests
 // =============================================================================
 
-func TestAppContext_ShutdownChan(t *testing.T) {
+func TestAppContext_ShutdownChan_ReturnsChannel(t *testing.T) {
 	appCtx := &AppContext{
 		Logger:     createTestLogger(),
 		shutdownCh: make(chan struct{}),

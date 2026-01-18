@@ -18,7 +18,7 @@ func TestEngagementEventRequest_ToEngagementEvent_ValidRequest(t *testing.T) {
 		wantMatchID    string
 		wantUserID     string
 		wantType       EngagementType
-		wantDeviceType DeviceType
+		wantDeviceType string
 	}{
 		{
 			name: "valid reaction engagement",
@@ -38,7 +38,7 @@ func TestEngagementEventRequest_ToEngagementEvent_ValidRequest(t *testing.T) {
 			wantMatchID:    "match-123",
 			wantUserID:     "user-456",
 			wantType:       EngagementTypeReaction,
-			wantDeviceType: DeviceMobile,
+			wantDeviceType: string(DeviceMobile),
 		},
 		{
 			name: "valid comment engagement",
@@ -59,7 +59,7 @@ func TestEngagementEventRequest_ToEngagementEvent_ValidRequest(t *testing.T) {
 			wantMatchID:    "match-456",
 			wantUserID:     "user-789",
 			wantType:       EngagementTypeComment,
-			wantDeviceType: DeviceDesktop,
+			wantDeviceType: string(DeviceDesktop),
 		},
 		{
 			name: "valid session engagement",
@@ -79,7 +79,7 @@ func TestEngagementEventRequest_ToEngagementEvent_ValidRequest(t *testing.T) {
 			wantMatchID:    "match-789",
 			wantUserID:     "user-012",
 			wantType:       EngagementTypeSession,
-			wantDeviceType: DeviceTablet,
+			wantDeviceType: string(DeviceTablet),
 		},
 		{
 			name: "valid engagement with TV device",
@@ -99,7 +99,7 @@ func TestEngagementEventRequest_ToEngagementEvent_ValidRequest(t *testing.T) {
 			wantMatchID:    "match-abc",
 			wantUserID:     "user-def",
 			wantType:       EngagementTypeVideoAction,
-			wantDeviceType: DeviceTV,
+			wantDeviceType: string(DeviceTV),
 		},
 		{
 			name: "engagement with related game event",
@@ -118,7 +118,7 @@ func TestEngagementEventRequest_ToEngagementEvent_ValidRequest(t *testing.T) {
 			wantMatchID:    "match-xyz",
 			wantUserID:     "user-xyz",
 			wantType:       EngagementTypeReaction,
-			wantDeviceType: DeviceMobile,
+			wantDeviceType: string(DeviceMobile),
 		},
 	}
 
@@ -464,8 +464,8 @@ func TestEngagementEventRequest_ToEngagementEvent_UnknownDeviceType(t *testing.T
 		t.Fatalf("ToEngagementEvent() unexpected error: %v", err)
 	}
 	// Unknown device types should default to DeviceUnknown
-	if event.DeviceType != DeviceUnknown {
-		t.Errorf("ToEngagementEvent().DeviceType = %q, want %q", event.DeviceType, DeviceUnknown)
+	if event.DeviceType != string(DeviceUnknown) {
+		t.Errorf("ToEngagementEvent().DeviceType = %q, want %q", event.DeviceType, string(DeviceUnknown))
 	}
 }
 
@@ -642,7 +642,7 @@ func TestEngagementEvent_ToKafkaMessage(t *testing.T) {
 		EngagementSubtype:  "cheer",
 		RelatedGameEventID: &relatedEventID,
 		GameMinute:         45,
-		DeviceType:         DeviceMobile,
+		DeviceType:         string(DeviceMobile),
 		Platform:           "ios",
 		CountryCode:        "US",
 		Content:            "Great goal!",
@@ -690,7 +690,7 @@ func TestEngagementEvent_ToKafkaMessage_NilRelatedEventID(t *testing.T) {
 		EngagementSubtype:  "join",
 		RelatedGameEventID: nil,
 		GameMinute:         0,
-		DeviceType:         DeviceMobile,
+		DeviceType:         string(DeviceMobile),
 		Timestamp:          time.Now().UTC(),
 	}
 
@@ -765,16 +765,16 @@ func TestEngagementEventRequest_ToEngagementEvent_AllDeviceTypes(t *testing.T) {
 	tests := []struct {
 		name           string
 		deviceType     string
-		wantDeviceType DeviceType
+		wantDeviceType string
 	}{
-		{"mobile device", "mobile", DeviceMobile},
-		{"desktop device", "desktop", DeviceDesktop},
-		{"tablet device", "tablet", DeviceTablet},
-		{"tv device", "tv", DeviceTV},
-		{"unknown device", "unknown", DeviceUnknown},
-		{"invalid device defaults to unknown", "invalid_device", DeviceUnknown},
-		{"empty device defaults to unknown", "", DeviceUnknown},
-		{"uppercase device defaults to unknown", "MOBILE", DeviceUnknown},
+		{"mobile device", "mobile", string(DeviceMobile)},
+		{"desktop device", "desktop", string(DeviceDesktop)},
+		{"tablet device", "tablet", string(DeviceTablet)},
+		{"tv device", "tv", string(DeviceTV)},
+		{"unknown device", "unknown", string(DeviceUnknown)},
+		{"invalid device defaults to unknown", "invalid_device", string(DeviceUnknown)},
+		{"empty device defaults to unknown", "", string(DeviceUnknown)},
+		{"uppercase device defaults to unknown", "MOBILE", string(DeviceUnknown)},
 	}
 
 	for _, tt := range tests {
