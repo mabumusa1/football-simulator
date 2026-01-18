@@ -356,7 +356,8 @@ class MatchSimulator:
         real_duration: int = 60,  # Real-world seconds to complete simulation
         events_per_minute: Tuple[int, int] = (20, 50),
         engagement_batch_size: int = 500,
-        concurrent_requests: int = 50
+        concurrent_requests: int = 50,
+        demo_mode: bool = False
     ):
         self.match_id = match_id
         self.api_url = api_url.rstrip('/')
@@ -368,6 +369,7 @@ class MatchSimulator:
         self.events_per_minute = events_per_minute
         self.engagement_batch_size = engagement_batch_size
         self.concurrent_requests = concurrent_requests
+        self.demo_mode = demo_mode
 
         # Load teams
         self.team1 = load_team_from_csv(team1_csv, 1, team1_name)
@@ -732,25 +734,259 @@ class MatchSimulator:
 
         logger.info(f"Viewers ready: {len(self.viewers):,} active")
 
+    def _display_lineups(self):
+        """Display pre-match lineups in a visually appealing format"""
+        C = Colors
+
+        # Header
+        print(f"\n{C.BOLD}{C.WHITE}╔{'═' * 62}╗{C.RESET}")
+        print(f"{C.BOLD}{C.WHITE}║{' ' * 20}⚽  MATCH DAY  ⚽{' ' * 24}║{C.RESET}")
+        print(f"{C.BOLD}{C.WHITE}╠{'═' * 62}╣{C.RESET}")
+        print(f"{C.BOLD}{C.WHITE}║{C.BLUE}   {self.team1.name.upper():^25}{C.WHITE} vs {C.YELLOW}{self.team2.name.upper():^25}{C.WHITE}   ║{C.RESET}")
+        print(f"{C.BOLD}{C.WHITE}╚{'═' * 62}╝{C.RESET}")
+
+        print(f"\n{C.BOLD}{C.BLUE}🔵 {self.team1.name.upper()}{C.RESET}".ljust(40) + f"{C.BOLD}{C.YELLOW}🟡 {self.team2.name.upper()}{C.RESET}")
+        print(f"{C.DIM}{'━' * 64}{C.RESET}")
+
+        # Get players by position
+        positions_order = ["GK", "DEF", "MF", "FWD"]
+        pos_map = {"GK": "GK", "DEF": "DEF", "MF": "MID", "FWD": "FWD"}
+
+        team1_by_pos = {pos: [] for pos in positions_order}
+        team2_by_pos = {pos: [] for pos in positions_order}
+
+        for p in self.team1.players[:11]:  # Starting 11
+            pos = p.position.upper()
+            if pos in team1_by_pos:
+                team1_by_pos[pos].append(p)
+            else:
+                team1_by_pos["MF"].append(p)
+
+        for p in self.team2.players[:11]:  # Starting 11
+            pos = p.position.upper()
+            if pos in team2_by_pos:
+                team2_by_pos[pos].append(p)
+            else:
+                team2_by_pos["MF"].append(p)
+
+        # Display side by side
+        max_rows = 11
+        row = 0
+        for pos in positions_order:
+            t1_players = team1_by_pos[pos]
+            t2_players = team2_by_pos[pos]
+            max_in_pos = max(len(t1_players), len(t2_players))
+
+            for i in range(max_in_pos):
+                if row >= max_rows:
+                    break
+                left = ""
+                right = ""
+
+                if i < len(t1_players):
+                    p = t1_players[i]
+                    left = f"{C.CYAN}{pos_map.get(pos, pos):>3}{C.RESET} {C.WHITE}{p.number:>2}{C.RESET}  {p.name[:20]:<20}"
+                else:
+                    left = " " * 30
+
+                if i < len(t2_players):
+                    p = t2_players[i]
+                    right = f"{C.CYAN}{pos_map.get(pos, pos):>3}{C.RESET} {C.WHITE}{p.number:>2}{C.RESET}  {p.name[:20]:<20}"
+                else:
+                    right = " " * 30
+
+                print(f"{left}    {right}")
+                row += 1
+
+        print(f"\n{C.DIM}{'═' * 64}{C.RESET}")
+        print(f"{C.BOLD}{C.GREEN}👥 {self.target_viewers:,} viewers watching{C.RESET}")
+        print(f"{C.DIM}{'═' * 64}{C.RESET}\n")
+        time.sleep(2)
+
+    def _display_event(self, event: GameEvent, engagements_count: int):
+        """Display a game event with colorful formatting"""
+        C = Colors
+        minute = event.game_minute
+        etype = event.event_type
+
+        # Find player name
+        player_name = "Unknown"
+        team = self.team1 if event.team_id == 1 else self.team2
+        for p in team.players:
+            if p.id == event.player_id:
+                player_name = p.name
+                break
+
+        team_color = C.BLUE if event.team_id == 1 else C.YELLOW
+        team_emoji = "🔵" if event.team_id == 1 else "🟡"
+
+        # Format based on event type
+        if etype == "goal":
+            print(f"\n{C.BG_GREEN}{C.WHITE}{C.BOLD}{'⚽' * 20}{C.RESET}")
+            print(f"{C.BOLD}⏱️  {minute}' │ {C.GREEN}⚽⚽⚽ GOOOOOAL! ⚽⚽⚽{C.RESET}")
+            print(f"       │ {team_emoji} {team_color}{C.BOLD}{team.name.upper()} SCORES!{C.RESET}")
+            print(f"       │ ⭐ {C.WHITE}{player_name}{C.RESET} with a brilliant finish!")
+            print(f"       │ 📊 {C.BLUE}{self.team1.name} {self.score[1]}{C.RESET} - {C.YELLOW}{self.score[2]} {self.team2.name}{C.RESET}")
+            time.sleep(1.5)
+
+        elif etype == "own_goal":
+            print(f"\n{C.BG_RED}{C.WHITE}{C.BOLD}{'😱' * 10}{C.RESET}")
+            print(f"{C.BOLD}⏱️  {minute}' │ {C.RED}😱 OWN GOAL! 😱{C.RESET}")
+            print(f"       │ {team_emoji} {player_name} puts it in his own net!")
+            print(f"       │ 📊 {C.BLUE}{self.team1.name} {self.score[1]}{C.RESET} - {C.YELLOW}{self.score[2]} {self.team2.name}{C.RESET}")
+            time.sleep(1.5)
+
+        elif etype == "red_card":
+            print(f"\n{C.BG_RED}{C.WHITE}{C.BOLD}  🟥 RED CARD 🟥  {C.RESET}")
+            print(f"{C.BOLD}⏱️  {minute}' │ {C.RED}🟥 RED CARD!{C.RESET}")
+            print(f"       │ {team_emoji} {C.RED}{player_name}{C.RESET} is sent off!")
+            print(f"       │ 😤 The crowd erupts!")
+            time.sleep(1.2)
+
+        elif etype == "yellow_card":
+            print(f"\n{C.BOLD}⏱️  {minute}' │ {C.YELLOW}🟨 YELLOW CARD{C.RESET}")
+            print(f"       │ {team_emoji} {player_name} is booked")
+            time.sleep(0.5)
+
+        elif etype == "penalty":
+            print(f"\n{C.BG_MAGENTA}{C.WHITE}{C.BOLD}  ⚡ PENALTY! ⚡  {C.RESET}")
+            print(f"{C.BOLD}⏱️  {minute}' │ {C.MAGENTA}⚡ PENALTY AWARDED!{C.RESET}")
+            print(f"       │ {team_emoji} {team.name} at the spot!")
+            print(f"       │ 😰 The tension is unbearable...")
+            time.sleep(1.5)
+
+        elif etype == "penalty_saved":
+            print(f"\n{C.BOLD}⏱️  {minute}' │ {C.CYAN}🧤 PENALTY SAVED!{C.RESET}")
+            print(f"       │ {team_emoji} What a save by the keeper!")
+            time.sleep(1.0)
+
+        elif etype == "var_review":
+            print(f"\n{C.BG_BLUE}{C.WHITE}{C.BOLD}  📺 VAR REVIEW 📺  {C.RESET}")
+            print(f"{C.BOLD}⏱️  {minute}' │ {C.BLUE}📺 VAR CHECKING...{C.RESET}")
+            print(f"       │ 🔍 Reviewing the play...")
+            time.sleep(1.0)
+
+        elif etype == "shot_on_target":
+            print(f"\n{C.BOLD}⏱️  {minute}' │ {C.CYAN}💥 SHOT ON TARGET!{C.RESET}")
+            print(f"       │ {team_emoji} {player_name} forces a save!")
+            time.sleep(0.3)
+
+        elif etype == "substitution":
+            sub_out = event.metadata.get("player_out", "Player")
+            sub_in = event.metadata.get("player_in", "Player")
+            print(f"\n{C.BOLD}⏱️  {minute}' │ {C.WHITE}🔄 SUBSTITUTION{C.RESET}")
+            print(f"       │ {team_emoji} {C.RED}⬇️ {sub_out}{C.RESET} | {C.GREEN}⬆️ {sub_in}{C.RESET}")
+            time.sleep(0.3)
+
+        elif etype == "injury":
+            print(f"\n{C.BOLD}⏱️  {minute}' │ {C.RED}🏥 INJURY{C.RESET}")
+            print(f"       │ {team_emoji} {player_name} is down!")
+            time.sleep(0.5)
+
+        elif etype == "kickoff":
+            print(f"\n{C.BG_GREEN}{C.WHITE}{C.BOLD}{'═' * 50}{C.RESET}")
+            print(f"{C.BOLD}⏱️   0' │ 🏁 {C.GREEN}KICKOFF! The match begins!{C.RESET}")
+            print(f"{C.BG_GREEN}{C.WHITE}{C.BOLD}{'═' * 50}{C.RESET}")
+            time.sleep(1.0)
+
+        elif etype == "half_time":
+            print(f"\n{C.BG_YELLOW}{C.WHITE}{C.BOLD}{'═' * 50}{C.RESET}")
+            print(f"{C.BOLD}⏱️  45' │ ⏸️  {C.YELLOW}HALF TIME{C.RESET}")
+            print(f"       │ 📊 {C.BLUE}{self.team1.name} {self.score[1]}{C.RESET} - {C.YELLOW}{self.score[2]} {self.team2.name}{C.RESET}")
+            print(f"{C.BG_YELLOW}{C.WHITE}{C.BOLD}{'═' * 50}{C.RESET}")
+            time.sleep(1.5)
+
+        elif etype == "second_half":
+            print(f"\n{C.BG_GREEN}{C.WHITE}{C.BOLD}{'═' * 50}{C.RESET}")
+            print(f"{C.BOLD}⏱️  46' │ ▶️  {C.GREEN}SECOND HALF BEGINS!{C.RESET}")
+            print(f"{C.BG_GREEN}{C.WHITE}{C.BOLD}{'═' * 50}{C.RESET}")
+            time.sleep(0.5)
+
+        elif etype == "full_time":
+            print(f"\n{C.BG_WHITE}{C.BOLD}{'═' * 50}{C.RESET}")
+            print(f"{C.BOLD}⏱️  90' │ 🏁 {C.GREEN}FULL TIME!{C.RESET}")
+            print(f"       │")
+            print(f"       │ {C.BOLD}📊 FINAL SCORE{C.RESET}")
+            print(f"       │ {C.BLUE}{C.BOLD}{self.team1.name} {self.score[1]}{C.RESET} - {C.YELLOW}{C.BOLD}{self.score[2]} {self.team2.name}{C.RESET}")
+            print(f"{C.BG_WHITE}{C.BOLD}{'═' * 50}{C.RESET}")
+            time.sleep(2.0)
+
+        # Show engagement spike for important events
+        if etype in {"goal", "own_goal", "red_card", "penalty", "var_review", "full_time"}:
+            self._display_engagement_spike(etype, engagements_count)
+
+    def _display_engagement_spike(self, event_type: str, total_engagements: int):
+        """Display engagement reaction to an event"""
+        C = Colors
+
+        # Simulate breakdown of engagement types
+        multiplier = ENGAGEMENT_MULTIPLIERS.get(GameEventType(event_type), 1.0)
+        spike_count = int(total_engagements * multiplier * random.uniform(0.8, 1.2))
+
+        # Break down by type
+        reactions = int(spike_count * 0.55)
+        comments = int(spike_count * 0.25)
+        shares = int(spike_count * 0.12)
+        other = spike_count - reactions - comments - shares
+
+        # Choose emoji based on event type
+        if event_type == "goal":
+            emoji = "🎉"
+            label = "CELEBRATION"
+        elif event_type in {"red_card", "own_goal"}:
+            emoji = "😱"
+            label = "SHOCK"
+        elif event_type == "penalty":
+            emoji = "😰"
+            label = "TENSION"
+        elif event_type == "var_review":
+            emoji = "🤔"
+            label = "ANTICIPATION"
+        else:
+            emoji = "⚡"
+            label = "REACTION"
+
+        print(f"       │")
+        print(f"       │ {C.MAGENTA}⚡ ENGAGEMENT {label}: {spike_count:,} reactions!{C.RESET}")
+        print(f"       │    {emoji} {reactions:,} cheers | 💬 {comments:,} comments | 📤 {shares:,} shares")
+        print()
+        time.sleep(0.5)
+
     async def run(self):
         """Run the full match simulation"""
-        logger.info("=" * 60)
-        logger.info(f"MATCH SIMULATION: {self.team1.name} vs {self.team2.name}")
-        logger.info(f"Match ID: {self.match_id}")
-        logger.info(f"Target Viewers: {self.target_viewers:,}")
-        logger.info(f"Match Duration: {self.match_duration} minutes (no delays)")
-        logger.info("=" * 60)
+        if self.demo_mode:
+            # Demo mode: colorful display
+            self._display_lineups()
+        else:
+            logger.info("=" * 60)
+            logger.info(f"MATCH SIMULATION: {self.team1.name} vs {self.team2.name}")
+            logger.info(f"Match ID: {self.match_id}")
+            logger.info(f"Target Viewers: {self.target_viewers:,}")
+            logger.info(f"Match Duration: {self.match_duration} minutes (no delays)")
+            logger.info("=" * 60)
 
         connector = aiohttp.TCPConnector(limit=self.concurrent_requests)
         async with aiohttp.ClientSession(connector=connector) as session:
             # Add all viewers before kickoff
-            await self._ramp_up_viewers(self.target_viewers)
+            if not self.demo_mode:
+                await self._ramp_up_viewers(self.target_viewers)
+            else:
+                # Faster ramp-up for demo, no logging
+                for i in range(self.target_viewers):
+                    viewer = self._create_viewer()
+                    self.viewers[viewer.user_id] = viewer
 
             # Simulate each minute
             for minute in range(self.match_duration + 1):
                 self.current_minute = minute
 
                 game_events, engagements = await self._simulate_minute(session)
+
+                # In demo mode, display important events
+                if self.demo_mode:
+                    for event in game_events:
+                        if event.event_type in IMPORTANT_EVENTS:
+                            self._display_event(event, len(engagements))
 
                 # Send game events (individually as they happen)
                 await self._send_game_events(session, game_events)
@@ -760,13 +996,17 @@ class MatchSimulator:
                     batch = engagements[i:i + self.engagement_batch_size]
                     await self._send_engagements(session, batch)
 
-                # Progress log every 15 minutes
-                if minute % 15 == 0 or minute in [45, 90]:
+                # Progress log every 15 minutes (non-demo mode only)
+                if not self.demo_mode and (minute % 15 == 0 or minute in [45, 90]):
                     logger.info(
                         f"Min {minute:2d} | Score: {self.score[1]}-{self.score[2]} | "
                         f"Viewers: {len(self.viewers):,} | "
                         f"Engagements: {self.stats.engagement_by_minute[minute]:,}"
                     )
+
+                # Small delay between minutes in demo mode for readability
+                if self.demo_mode and minute < self.match_duration:
+                    await asyncio.sleep(0.1)
 
         self._print_final_stats()
 
@@ -836,8 +1076,16 @@ def main():
     parser.add_argument("--real-duration", type=int, default=60, help="Real-world seconds to run simulation (default: 60s)")
     parser.add_argument("--batch-size", type=int, default=500)
     parser.add_argument("--concurrency", type=int, default=50)
+    parser.add_argument("--demo", action="store_true", help="Enable demo mode with colorful output and live match commentary")
 
     args = parser.parse_args()
+
+    # Demo mode defaults: fewer viewers, shorter match for faster demo
+    if args.demo:
+        if args.viewers == 100000:  # Only override if using default
+            args.viewers = 5000
+        if args.duration == 90:  # Only override if using default
+            args.duration = 90  # Keep full match for demo
 
     # Resolve CSV paths
     script_dir = Path(__file__).parent
@@ -856,7 +1104,8 @@ def main():
         match_duration=args.duration,
         real_duration=args.real_duration,
         engagement_batch_size=args.batch_size,
-        concurrent_requests=args.concurrency
+        concurrent_requests=args.concurrency,
+        demo_mode=args.demo
     )
 
     asyncio.run(simulator.run())
