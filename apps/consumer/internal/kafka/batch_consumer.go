@@ -41,6 +41,7 @@ type GenericBatchConsumer[T any] struct {
 	batchLock sync.Mutex
 	ticker    *time.Ticker
 	done      chan struct{}
+	closeOnce sync.Once
 	wg        sync.WaitGroup
 }
 
@@ -117,10 +118,16 @@ func (c *GenericBatchConsumer[T]) Start(ctx context.Context) {
 		go c.worker(ctx, i)
 	}
 
-	<-ctx.Done()
-	c.logger.Info(fmt.Sprintf("context cancelled, stopping %s workers", c.consumerName))
-
-	close(c.done)
+	// Wait for either context cancellation or Stop() to be called
+	select {
+	case <-ctx.Done():
+		c.logger.Info(fmt.Sprintf("context cancelled, stopping %s workers", c.consumerName))
+		c.closeOnce.Do(func() {
+			close(c.done)
+		})
+	case <-c.done:
+		c.logger.Info(fmt.Sprintf("stop called, stopping %s workers", c.consumerName))
+	}
 }
 
 // worker fetches and processes messages from Kafka.
@@ -298,7 +305,9 @@ func (c *GenericBatchConsumer[T]) flushWithContext(ctx context.Context) {
 // Stop signals the consumer to stop and waits for it to finish.
 func (c *GenericBatchConsumer[T]) Stop() {
 	c.logger.Info(fmt.Sprintf("stopping %s batch consumer", c.consumerName))
-	close(c.done)
+	c.closeOnce.Do(func() {
+		close(c.done)
+	})
 	c.wg.Wait()
 	c.logger.Info(fmt.Sprintf("%s batch consumer stopped", c.consumerName))
 }

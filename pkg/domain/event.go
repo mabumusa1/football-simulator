@@ -183,12 +183,18 @@ func EventFromKafkaMessage(data []byte) (*Event, error) {
 		return nil, err
 	}
 
+	// Validate matchId is not empty
+	if msg.MatchID == "" {
+		return nil, NewValidationError("matchId", "is required")
+	}
+
 	timestamp, err := time.Parse(time.RFC3339Nano, msg.Timestamp)
 	if err != nil {
 		// Try RFC3339 as fallback
 		timestamp, err = time.Parse(time.RFC3339, msg.Timestamp)
 		if err != nil {
-			return nil, err
+			// Fall back to current time for invalid timestamps
+			timestamp = time.Now()
 		}
 	}
 

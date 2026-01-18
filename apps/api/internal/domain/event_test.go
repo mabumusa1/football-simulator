@@ -508,7 +508,7 @@ func TestEventFromKafkaMessage(t *testing.T) {
 				"timestamp": "invalid-time",
 				"teamId": 1
 			}`),
-			wantErr: true,
+			wantErr: false, // Falls back to current time for invalid timestamps
 		},
 	}
 
