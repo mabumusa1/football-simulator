@@ -10,6 +10,9 @@ services:
     networks:
       - internal
 
+    ports:
+      - "8123:8123"
+
     environment:
       CLICKHOUSE_DB: football_simulator
       CLICKHOUSE_USER: default
