@@ -53,7 +53,7 @@ scrape_configs:
       - names:
           - 'tasks.go-consumer'
         type: 'A'
-        port: 8080
+        port: 9091
     relabel_configs:
       - source_labels: [__address__]
         target_label: instance
