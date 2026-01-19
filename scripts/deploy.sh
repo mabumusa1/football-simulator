@@ -104,6 +104,21 @@ check_prerequisites() {
         fi
     fi
 
+    # Refresh ECR authentication (tokens expire after 12 hours)
+    if command -v aws &> /dev/null; then
+        echo -e "${BLUE}Refreshing ECR authentication...${NC}"
+        local region="${AWS_REGION:-us-east-1}"
+        local registry=$(grep "^REGISTRY=" "$PROJECT_DIR/.env" | cut -d'=' -f2 | cut -d'/' -f1)
+        if [ -n "$registry" ]; then
+            aws ecr get-login-password --region "$region" | docker login --username AWS --password-stdin "$registry" 2>/dev/null
+            if [ $? -eq 0 ]; then
+                echo -e "${GREEN}ECR authentication refreshed${NC}"
+            else
+                echo -e "${YELLOW}Warning: ECR login failed, continuing anyway${NC}"
+            fi
+        fi
+    fi
+
     echo -e "${GREEN}Prerequisites OK${NC}"
 }
 

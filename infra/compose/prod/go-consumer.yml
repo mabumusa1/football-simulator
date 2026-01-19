@@ -1,6 +1,6 @@
 services:
   go-consumer:
-    image: ${REGISTRY:-localhost:5000}/go-consumer:${VERSION:-latest}
+    image: ${REGISTRY}/go-consumer:${VERSION:?VERSION environment variable is required}
 
     networks:
       - internal

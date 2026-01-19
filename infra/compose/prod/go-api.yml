@@ -1,6 +1,6 @@
 services:
   go-api:
-    image: ${REGISTRY:-localhost:5000}/go-api:${VERSION:-latest}
+    image: ${REGISTRY}/go-api:${VERSION:?VERSION environment variable is required}
 
     networks:
       - traefik-public
