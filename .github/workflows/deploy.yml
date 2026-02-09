@@ -135,7 +135,7 @@ jobs:
           echo "📦 Building version: ${VERSION}"
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v5
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ env.AWS_ROLE_ARN }}
           role-session-name: GitHubActions-Build-${{ github.run_id }}
@@ -191,7 +191,7 @@ jobs:
 
     steps:
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v5
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ env.AWS_ROLE_ARN }}
           role-session-name: GitHubActions-Deploy-${{ github.run_id }}
@@ -455,7 +455,7 @@ jobs:
 
     steps:
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v5
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ env.AWS_ROLE_ARN }}
           role-session-name: GitHubActions-Infra-${{ github.run_id }}
